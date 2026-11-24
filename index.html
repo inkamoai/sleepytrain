@@ -254,8 +254,13 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 .chip.probchip { background: rgba(255, 181, 71, .18); color: var(--amber); margin: 0 0 4px; }
 /* possible depots (deduced) and depots reported by the staff: dashed rings */
 .st.pd { fill: rgba(11, 18, 32, .55) !important; stroke-dasharray: 3 2.2; stroke-width: 2.2; stroke-opacity: 1; }
-.st.pd.ok { stroke-dasharray: none; stroke-width: 2.6; }
+.st.lowdot { fill: rgba(11, 18, 32, .5) !important; stroke-dasharray: 1 2; stroke-width: 1.8; stroke-opacity: .85; }
 .pdring { fill: none; stroke-dasharray: 3 2.2; stroke-width: 1.8; vector-effect: non-scaling-stroke; pointer-events: none; }
+.pdring.lowring { stroke-dasharray: 1 2.5; opacity: .7; }
+.chip.lvchip { color: var(--lv); border: 1px solid var(--lv); background: transparent; margin: 0 6px 4px 0; }
+.tr.lv3, .tr.lv2, .tr.lv1 { border-left: 2px dashed var(--lvc, var(--line)); }
+.tr.lv2 .t, .tr.lv1 .t { opacity: .75; }
+.lvscale { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; font-size: 12px; color: var(--muted); }
 .chip.pdchip { background: rgba(120, 170, 255, .16); color: #9cc0ff; margin: 0 0 4px; }
 .chip.okchip { background: rgba(95, 211, 154, .18); color: var(--green); margin: 0 0 4px; }
 .pdsec { border: 1px dashed rgba(156, 192, 255, .45); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -338,7 +343,9 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       <svg width="16" height="16"><path d="M8,8L8,2A6,6 0 0 1 13.2,11Z" fill="#14a0de"/><path d="M8,8L13.2,11A6,6 0 1 1 8,2Z" fill="#c8102e"/><circle cx="8" cy="8" r="6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>
       <span>colori delle aziende</span>
       <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="#9cc0ff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>
-      <span>possibile / segnalato</span>
+      <span>probabili</span>
+      <svg width="16" height="16"><circle cx="8" cy="8" r="5" fill="none" stroke="#9aa6c0" stroke-width="1.8" stroke-dasharray="1 2"/></svg>
+      <span>prob. bassa (0)</span>
     </div>
   </div>
   <aside class="panel" id="panel"></aside>
@@ -538,20 +545,45 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 
   // ---------- dati ----------
   // st.k[date] = { operator: [pairs, arrOnly, depOnly] }
+  // Five probability levels. Trains are counted for the top three; "bassa" and "bassissima" count 0.
+  //  5 altissima: evening arrival + morning departure in the timetables, or reported by the staff
+  //  4 alta:      first departure at dawn with no arrival before it (the arrival was an empty run)
+  //  3 media:     the night before a Sunday/holiday the unit stays until the next working day; or a possible depot (deduced)
+  //  2 bassa:     evening arrival with no departure from here the next morning
+  //  1 bassissima: possible depot with a weak signal
+  const LV = { 5: { n: "altissima", c: "#5fd39a" }, 4: { n: "alta", c: "#7cc4ff" }, 3: { n: "media", c: "#ffb547" },
+    2: { n: "bassa", c: "#ef8a5a" }, 1: { n: "bassissima", c: "#9aa6c0" } };
+  const lvChip = (l, extra) => `<span class="chip lvchip" style="--lv:${LV[l].c}">probabilità ${LV[l].n}${extra ? " · " + extra : ""}</span>`;
+  // possible depots are deduced from weekday nights: not shown the night before a Sunday or a holiday
+  const weekdayNight = (d) => { const nx = addDays(d, 1); return new Date(nx + "T12:00:00Z").getUTCDay() !== 0 && !(DATA.holidays || []).includes(nx); };
   function nightOf(st, d, only) {
     const n = st.k[d] || {};
-    const byOp = [];
-    let count = 0;
+    const map = {};
+    const get = (op) => map[op] || (map[op] = { op, pairs: [], arr: [], dep: [], long: [], pd: [], sure: 0, count: 0, low: 0, lv: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 } });
     for (const op in n) {
       if (only && op !== only) continue;
-      const [pairs, arr, dep] = n[op];
-      const c = Math.max(pairs.length + arr.length, pairs.length + dep.length);
-      if (!c) continue;
-      byOp.push({ op, pairs, arr, dep, count: c });
-      count += c;
+      const [pairs, arr, dep, long] = n[op];
+      const o = get(op);
+      o.pairs = pairs; o.arr = arr || []; o.dep = dep || []; o.long = long || [];
+      o.lv[5] += pairs.length; o.lv[4] += o.dep.length; o.lv[3] += o.long.length; o.lv[2] += o.arr.length;
     }
-    byOp.sort((a, b) => b.count - a.count);
-    return { byOp, count };
+    for (const p of st.pd || []) {
+      if (only && p.op !== only) continue;
+      if (p.lv !== "c" && !weekdayNight(d)) continue;
+      const o = get(p.op);
+      o.pd.push(p);
+      if (p.lv === "c") o.lv[5] += p.n || 1; else if (p.lv === "p") o.lv[3] += p.n || 1; else o.lv[1] += 1;
+    }
+    const byOp = [];
+    let count = 0, sure = 0, low = 0;
+    for (const op in map) {
+      const o = map[op];
+      o.sure = o.lv[5]; o.count = o.lv[5] + o.lv[4] + o.lv[3]; o.low = o.lv[2] + o.lv[1];
+      if (!o.count && !o.low) continue;
+      byOp.push(o); count += o.count; sure += o.sure; low += o.low;
+    }
+    byOp.sort((a, b) => b.count - a.count || b.low - a.low);
+    return { byOp, count, sure, low };
   }
 
   // ---------- mappa ----------
@@ -660,49 +692,49 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     const items = [];
     for (const st of DATA.st) {
       const n = nightOf(st, ed, opFilter);
-      const pds = pdList(st, opFilter);
-      if (n.count === 0 && !pds.length && st !== selected) continue;
+      if (n.count === 0 && !(showPd && n.low) && st !== selected) continue;
       const mine = !region || st.r === region;
       // an operator filter shows every station of that operator, towns included
       const visible = opFilter || region || st.t === 1 || (st.t === 2 && spanKm < 650) || (st.t === 3 && spanKm < 260) || st === selected;
-      if (mine && visible) items.push({ st, n, pds, faded: false });
-      else if (!mine && st.t === 1 && n.count) items.push({ st, n, pds: [], faded: true });
+      if (mine && visible) items.push({ st, n, faded: false });
+      else if (!mine && st.t === 1 && n.sure) items.push({ st, n, faded: true });
     }
     items.sort((a, b) => (b.faded - a.faded) || (a.n.count - b.n.count));
     shownStations = items.filter(x => !x.faded).map(x => x.st);
 
     const labels = [];
-    for (const { st, n, pds, faded } of items) {
-      if (n.count === 0 && pds.length) {
-        // only a possible / reported depot here: hollow dashed ring in the operator's colour
-        const pc = pdTrains(pds);
-        const base = Math.max(st.t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(pc) * 1.5, 12));
-        const rad = base * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
+    const radOf = (c, t) => Math.max(t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(Math.max(c, 1)) * 1.5, 14)) * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
+    const labelRule = (st) => st === selected || st.t === 1 || (st.t === 2 && (region || spanKm < 650)) || (st.t === 3 && (region || spanKm < 200));
+    for (const { st, n, faded } of items) {
+      const mainOp = n.byOp.length ? n.byOp[0].op : null;
+      if (!faded && n.sure === 0) {
+        // no certain train: only uncertain ones. Dashed ring sized by the trains counted (alta/media);
+        // small dotted ring when only "bassa"/"bassissima" (0 trains counted)
+        const only0 = n.count === 0;
+        const rad = only0 ? radOf(1, 3) * 0.8 : radOf(n.count, st.t);
         if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
-        const ok = pds.some(p => p.lv === "c");
-        const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st pd" + (ok ? " ok" : "") + (st === selected ? " sel" : "") }, gSt);
-        dot.style.stroke = opInfo(pds[0].op).c;
+        const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st " + (only0 ? "lowdot" : "pd") + (st === selected ? " sel" : "") }, gSt);
+        if (mainOp) dot.style.stroke = opInfo(mainOp).c;
         dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
-        el("title", {}, dot).textContent = `${st.n}: ${ok ? "deposito segnalato dal personale" : "deposito possibile, circa " + pc + " treni (da verificare)"}`;
-        const show = st === selected || st.t === 1 || (st.t === 2 && (region || spanKm < 650)) || (st.t === 3 && (region || spanKm < 200));
-        if (show) labels.push({ st, rad, faded: false, pr: st === selected ? 0 : st.t + 0.5, c: 0 });
+        el("title", {}, dot).textContent = only0 ? `${st.n}: probabilità bassa, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
+        if (labelRule(st)) labels.push({ st, rad, faded: false, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
         continue;
       }
-      const c = n.count;
-      const base = Math.max(st.t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(Math.max(c, 1)) * 1.5, 14));
-      const rad = base * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
+      const c = n.sure;
+      const rad = radOf(c, st.t);
       if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
-      const cls = "st" + (st === selected ? " sel" : "") + (n.byOp.length > 1 ? " multi" : "") + (faded ? " faded" : "");
-      // dot coloured by operator; several operators -> pie slices sized by their trains
+      const sureOps = n.byOp.filter(o => o.sure > 0);
+      const cls = "st" + (st === selected ? " sel" : "") + (sureOps.length > 1 ? " multi" : "") + (faded ? " faded" : "");
+      // solid dot = certain trains (altissima), coloured by operator; several operators -> pie slices
       const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: cls }, gSt);
       if (!faded) {
-        if (n.byOp.length === 1) dot.style.fill = opInfo(n.byOp[0].op).c;
-        else if (n.byOp.length > 1) {
+        if (sureOps.length === 1) dot.style.fill = opInfo(sureOps[0].op).c;
+        else if (sureOps.length > 1) {
           dot.style.fill = "transparent";
           let a0 = -Math.PI / 2;
           const g = el("g", { class: "pie" }, gSt);
-          for (const o of n.byOp) {
-            const a1 = a0 + 2 * Math.PI * o.count / c;
+          for (const o of sureOps) {
+            const a1 = a0 + 2 * Math.PI * o.sure / c;
             const large = a1 - a0 > Math.PI ? 1 : 0;
             const p = `M${st.x},${st.y}L${st.x + rad * Math.cos(a0)},${st.y + rad * Math.sin(a0)}A${rad},${rad} 0 ${large} 1 ${st.x + rad * Math.cos(a1)},${st.y + rad * Math.sin(a1)}Z`;
             el("path", { d: p, fill: opInfo(o.op).c }, g);
@@ -710,16 +742,17 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
           }
           gSt.appendChild(dot); // keep the circle (outline + click target) above the slices
         }
-        if (st === selected) dot.style.fill = n.byOp.length > 1 ? "transparent" : "#fff";
+        if (st === selected) dot.style.fill = sureOps.length > 1 ? "transparent" : "#fff";
       }
-      if (!faded && pds.length) {
-        // certain/probable trains here, and more possibly sleeping nearby on the sidings: an extra dashed ring
-        const ring = el("circle", { cx: st.x, cy: st.y, r: rad + 3 / ppu, class: "pdring" }, gSt);
-        ring.style.stroke = opInfo(pds[0].op).c;
+      if (!faded && (n.count > n.sure || (showPd && n.low))) {
+        // uncertain trains on top of the certain ones: dashed outer ring, as large as the total counted
+        const unc = n.byOp.find(o => o.count > o.sure) || n.byOp.find(o => o.low) || n.byOp[0];
+        const ring = el("circle", { cx: st.x, cy: st.y, r: Math.max(radOf(n.count, st.t), rad + 2.5 / ppu), class: "pdring" + (n.count > n.sure ? "" : " lowring") }, gSt);
+        ring.style.stroke = opInfo(unc.op).c;
       }
       if (!faded) {
         dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
-        el("title", {}, dot).textContent = `${st.n}: ${c} treni in deposito` + (n.byOp.length ? " (" + n.byOp.map(o => opInfo(o.op).s + " " + o.count).join(", ") + ")" : "");
+        el("title", {}, dot).textContent = `${st.n}: ${n.sure} treni certi` + (n.count > n.sure ? `, ${n.count - n.sure} probabili` : "") + (n.byOp.length ? " (" + n.byOp.map(o => opInfo(o.op).s + " " + o.count).join(", ") + ")" : "");
       }
       // label rules: big cities always; medium from a regional zoom; towns only when zoomed in
       const show = st === selected || st.t === 1 || (st.t === 2 && (region || spanKm < 650)) || (st.t === 3 && (region || spanKm < 200));
@@ -819,33 +852,38 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       regionBars = `<div><h3>Per regione</h3><div class="regbars">${rs.map(([r, c]) => `<button data-r="${esc(r)}" title="Mostra ${esc(r)}"><span class="rn">${esc(r)}</span><span class="bar" style="width:${Math.max(2, c / rmax * 100)}%"></span><span class="c">${c}</span></button>`).join("")}</div></div>`;
     }
     const occ = occupancy(ranked.map(x => x.st), ed);
-    const totProb = ranked.reduce((s, x) => s + x.n.byOp.reduce((a, o) => a + o.dep.length, 0), 0);
-    // possible / reported depots in scope (not counted in the totals above: they are not in the timetables)
-    const pdAll = DATA.st.filter(inScope).map(st => ({ st, pds: (st.pd || []).filter(p => !opFilter || p.op === opFilter) })).filter(x => x.pds.length)
-      .sort((a, b) => (b.pds.some(p => p.lv === "c") - a.pds.some(p => p.lv === "c")) || pdTrains(b.pds) - pdTrains(a.pds));
-    const pdSection = pdAll.length ? `<div><h3>Depositi possibili e segnalati</h3>
-        <div class="pdtoggle"><button class="btn" id="pdtoggle" aria-pressed="${showPd}">${showPd ? "Mostrati sulla mappa" : "Nascosti sulla mappa"}</button>
-          <span>${pdAll.length} luoghi · circa ${pdAll.reduce((s, x) => s + pdTrains(x.pds), 0)} treni, da verificare</span></div>
-        <p class="lonely" style="margin:6px 0">Treni che probabilmente dormono qui arrivando e ripartendo a vuoto: non compaiono negli orari pubblici e non sono contati sopra.</p>
-        <div class="list">${pdAll.slice(0, region ? 100 : 25).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
-          <span class="dots">${x.pds.map(p => `<i style="background:transparent;border:2px ${p.lv === "c" ? "solid" : "dashed"} ${opInfo(p.op).c}" title="${esc(p.op)}"></i>`).join("")}</span>
-          <span class="c">${x.pds.some(p => p.lv === "c") ? "✓" : "~" + pdTrains(x.pds)}</span></button>`).join("")}</div></div>` : "";
+    // trains per probability level (bassa / bassissima: places, 0 trains)
+    const lvTot = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    const allIn = DATA.st.filter(inScope).map(st => ({ st, n: nightOf(st, ed, opFilter) }));
+    for (const x of allIn) for (const o of x.n.byOp) for (const l in lvTot) lvTot[l] += o.lv[l];
+    const lowPlaces = allIn.filter(x => x.n.low && !x.n.count);
+    const lvLine = `<div class="lvscale">${[5, 4, 3].map(l => `${lvChip(l)}<b>${lvTot[l]}</b>`).join(" ")}
+        ${lvChip(2)}<b>0</b><span>(${lvTot[2]} arrivi)</span> ${lvChip(1)}<b>0</b><span>(${lvTot[1]} luoghi)</span></div>`;
+    // uncertain places (no certain train): possible depots and stations with only "bassa" arrivals
+    const uncertain = allIn.filter(x => !x.n.sure && (x.n.count || x.n.low)).sort((a, b) => b.n.count - a.n.count || b.n.low - a.n.low);
+    const pdSection = uncertain.length ? `<div><h3>Luoghi incerti</h3>
+        <div class="pdtoggle"><button class="btn" id="pdtoggle" aria-pressed="${showPd}">Probabilità bassa: ${showPd ? "mostrata" : "nascosta"} sulla mappa</button></div>
+        <p class="lonely" style="margin:6px 0">Nessun treno certo: treni probabili (arrivano o ripartono a vuoto, non presenti negli orari pubblici) e luoghi a probabilità bassa, contati come 0 treni.</p>
+        <div class="list">${uncertain.slice(0, region ? 150 : 30).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
+          <span class="dots">${x.n.byOp.map(o => `<i style="background:transparent;border:2px ${o.count ? "dashed" : "dotted"} ${opInfo(o.op).c}" title="${esc(o.op)}"></i>`).join("")}</span>
+          <span class="c">${x.n.count ? "~" + x.n.count : "0"}</span></button>`).join("")}</div></div>` : "";
     $("panel").innerHTML = `
       <div><div class="eyebrow">Notte ${esc(nightText({ weekday: "short", day: "numeric", month: "short" }))}</div>
         <h2 class="stname">${opFilter ? badge(opFilter) + " " : ""}${esc(region || "Tutta Italia")}</h2>
         ${region ? `<button class="btn" id="allit" style="margin-top:8px">← Tutta Italia</button>` : ""}</div>
       <div class="kpis">
-        <div class="kpi"><div class="v">${tot}</div><div class="k">treni in deposito${totProb ? ` · ${totProb} probabili` : ""}</div></div>
-        <div class="kpi"><div class="v">${ranked.length}</div><div class="k">città e paesi</div></div>
+        <div class="kpi"><div class="v">${tot}</div><div class="k">treni in deposito · ${lvTot[5]} certi</div></div>
+        <div class="kpi"><div class="v">${ranked.length}</div><div class="k">città e paesi${lowPlaces.length ? ` · +${lowPlaces.length} incerti` : ""}</div></div>
         <div class="kpi"><div class="v">${ops.length}</div><div class="k">aziende</div></div>
       </div>
+      ${lvLine}
       <div><h3>Treni fermi durante la notte</h3><div class="chart" id="occ"></div></div>
       ${regionBars}
       <div><h3>Per azienda</h3><div class="oplist">${ops.length ? ops.map(([op, c]) => `
         <div class="oprow">${badge(op, true)}<div class="bar"><i style="width:${Math.max(2, c / max * 100)}%;background:${opInfo(op).c}"></i></div><span class="c">${c}</span></div>`).join("") : `<div class="empty">Nessun treno in deposito.</div>`}</div></div>
       <div><h3>${region ? "Città e paesi" : "Dove dormono più treni"}</h3>
         <div class="list">${ranked.slice(0, region ? 200 : 30).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
-          <span class="dots">${x.n.byOp.map(o => `<i style="background:${opInfo(o.op).c}" title="${esc(o.op)}"></i>`).join("")}</span><span class="c">${x.n.count}</span></button>`).join("")}</div>
+          <span class="dots">${x.n.byOp.filter(o => o.count).map(o => `<i style="background:${o.sure ? opInfo(o.op).c : "transparent"};${o.sure ? "" : `border:2px dashed ${opInfo(o.op).c}`}" title="${esc(o.op)}"></i>`).join("")}</span><span class="c">${x.n.count}</span></button>`).join("")}</div>
       </div>
       ${pdSection}
       ${methodNote()}`;
@@ -870,8 +908,9 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     for (const st of stations) {
       for (const o of nightOf(st, ed, opFilter).byOp) {
         for (const p of o.pairs) { const a = ev(p[1]); add(a, a + p[6]); }
-        for (const a of o.arr) add(ev(a[1]), T1 + STEP);
+        for (const a of o.long) add(ev(a[1]), T1 + STEP); // stays over the holiday: still there in the morning
         for (const d of o.dep) add(T0, toMin(d[1]) + 1440);
+        // arrivals with "bassa" probability count as 0 trains: not in the chart
       }
     }
     const pts = []; let c = 0;
@@ -978,9 +1017,11 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     const all = nightOf(st, ed);
     const shown = winFilter ? all.byOp.filter(o => o.op === winFilter) : all.byOp;
     const pairsAll = shown.flatMap(o => o.pairs);
+    const longAll = shown.flatMap(o => o.long);
     const deps = [...pairsAll.map(p => p[4]), ...shown.flatMap(o => o.dep.map(d => d[1]))].sort((a, b) => evOrder(a) - evOrder(b));
+    if (!deps.length && longAll.length) deps.push(fmtDay(longAll[0][9], { weekday: "short" }) + " " + longAll.map(p => p[4]).sort()[0]);
     const avg = pairsAll.length ? Math.round(pairsAll.reduce((s, p) => s + p[6], 0) / pairsAll.length) : null;
-    const longest = pairsAll.length ? Math.max(...pairsAll.map(p => p[6])) : null;
+    const longest = pairsAll.length || longAll.length ? Math.max(...pairsAll.map(p => p[6]), ...longAll.map(p => p[6])) : null;
     const count = shown.reduce((s, o) => s + o.count, 0);
     const probN = shown.reduce((s, o) => s + o.dep.length, 0);
 
@@ -995,45 +1036,61 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       return `<div class="model"><img src="img/models/${slug}.jpg" alt="${esc(MODELS[slug])}" loading="lazy" data-slug="${slug}">
         <div class="mname">${esc(declared || MODELS[slug])}</div><div class="mkind">${declared ? "materiale indicato" : "materiale tipico"}${diesel && !declared ? " · linea non elettrificata" : ""}</div></div>`;
     };
-    const sections = shown.map(o => {
-      const rows = o.pairs.map(p => `<div class="tr">
-          ${modelCell(o.op, p[7], p[8])}
-          <div><div class="t">${p[1]}</div><div class="sub">${numTag(p[0])}da ${esc(p[2])}</div>${infoLine(infoText(p[7]))}</div>
-          <div class="arrow">→</div>
-          <div><div class="t">${p[4]}</div><div class="sub">${numTag(p[3])}per ${esc(p[5])}</div>${infoLine(infoText(p[8]))}</div>
-          <div class="dwell"><div class="d">${dur(p[6])}</div><div class="info">sosta</div></div></div>`).join("");
-      const arr = "";
-      // probable: early first departure with no arrival before it in the public timetables
-      const dep = o.dep.map(d => `<div class="tr prob">${modelCell(o.op, d[3], "")}
-          <div><span class="chip probchip">probabile</span><div class="lonely">arrivo serale non presente negli orari pubblici (forse a vuoto da un deposito vicino)</div></div>
-          <div class="arrow">→</div>
-          <div><div class="t">${d[1]}</div><div class="sub">${numTag(d[0])}per ${esc(d[2])}</div>${infoLine(infoText(d[3]))}</div>
-          <div class="dwell"><div class="info">sosta non nota</div></div></div>`).join("");
-      const oavg = o.pairs.length ? dur(Math.round(o.pairs.reduce((s, p) => s + p[6], 0) / o.pairs.length)) : "—";
-      return `<section class="opsec">
-        <div class="opsec-h">${opLogo(o.op, 30)}<strong>${o.count} ${o.count === 1 ? "treno" : "treni"}</strong><span class="meta">${esc(o.op)}${o.dep.length ? ` · ${o.pairs.length} certi, ${o.dep.length} probabili` : ""} · sosta media ${oavg}</span></div>
-        <div class="tbl">
-          <div class="tr head"><div>Treno</div><div>Arriva la sera</div><div></div><div>Riparte il mattino</div><div class="dwell">Sosta</div></div>
-          ${rows}${arr}${dep}
-        </div></section>`;
-    }).join("");
-
-    // possible depot (deduced) or reported by the staff: always listed in the window, whatever the map toggle
-    const pds = (st.pd || []).filter(p => !winFilter || p.op === winFilter);
-    const pdHtml = pds.map(p => `<section class="pdsec${p.lv === "c" ? " ok" : ""}">
-        <div class="opsec-h">${opLogo(p.op, 30)}<span class="chip ${p.lv === "c" ? "okchip" : "pdchip"}">${p.lv === "c" ? "segnalato dal personale" : "deposito possibile"}</span>
-          <span class="meta">${esc(p.op)}</span></div>
-        <div class="big">${p.lv === "c" ? (p.n ? `${p.n} treni` : "Treni in sosta notturna") : `circa ${p.n} ${p.n === 1 ? "treno" : "treni"} (stima)`}</div>
+    const wdName = (iso) => fmtDay(iso, { weekday: "long" });
+    // possible depot (deduced) or reported by the staff
+    const pdBlock = (p) => {
+      const l = p.lv === "c" ? 5 : p.lv === "p" ? 3 : 1;
+      const n = l === 1 ? 0 : (p.n || 1);
+      return `<section class="pdsec${p.lv === "c" ? " ok" : ""}">
+        <div>${lvChip(l)}<span class="chip ${p.lv === "c" ? "okchip" : "pdchip"}">${p.lv === "c" ? "segnalato dal personale" : "deposito possibile"}</span></div>
+        <div class="big">${p.lv === "c" ? (p.n ? `${p.n} treni` : "Treni in sosta notturna (contato 1)") : `${n} ${n === 1 ? "treno" : "treni"} contati${l === 3 ? " (stima)" : ""}`}</div>
         ${p.why.length ? `<ul>${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
         ${p.yard ? `<div class="lonely">Qui ci sono circa ${p.yard >= 1000 ? (p.yard / 1000).toFixed(1).replace(".", ",") + " km" : p.yard + " m"} di binari di sosta (OpenStreetMap).</div>` : ""}
         ${p.lv === "c" ? "" : `<div class="lonely">Dedotto dagli orari: i treni ci arriverebbero e ripartirebbero a vuoto. Da verificare sul posto.</div>`}
-      </section>`).join("");
-    const pdOps = (st.pd || []).map(p => p.op).filter(op => !all.byOp.some(o => o.op === op));
+      </section>`;
+    };
+    const sections = shown.map(o => {
+      const rows = o.pairs.map(p => `<div class="tr">
+          ${modelCell(o.op, p[7], p[8])}
+          <div>${lvChip(5)}<div class="t">${p[1]}</div><div class="sub">${numTag(p[0])}da ${esc(p[2])}</div>${infoLine(infoText(p[7]))}</div>
+          <div class="arrow">→</div>
+          <div><div class="t">${p[4]}</div><div class="sub">${numTag(p[3])}per ${esc(p[5])}</div>${infoLine(infoText(p[8]))}</div>
+          <div class="dwell"><div class="d">${dur(p[6])}</div><div class="info">sosta</div></div></div>`).join("");
+      // media: the night before a Sunday/holiday, the unit stays until the first departure of the next working day
+      const long = o.long.map(p => `<div class="tr lv3" style="--lvc:${LV[3].c}">
+          ${modelCell(o.op, p[7], p[8])}
+          <div>${lvChip(3)}<div class="t">${p[1]}</div><div class="sub">${numTag(p[0])}da ${esc(p[2])}</div>${infoLine(infoText(p[7]))}</div>
+          <div class="arrow">→</div>
+          <div><div class="t">${p[4]}</div><div class="sub">${numTag(p[3])}per ${esc(p[5])}</div><div class="lonely">riparte ${esc(wdName(p[9]))}: nel giorno festivo da qui non parte nessun treno</div></div>
+          <div class="dwell"><div class="d">${dur(p[6])}</div><div class="info">fermo per il festivo</div></div></div>`).join("");
+      // alta: early first departure with no arrival before it in the public timetables
+      const dep = o.dep.map(d => `<div class="tr prob">${modelCell(o.op, d[3], "")}
+          <div>${lvChip(4)}<div class="lonely">arrivo serale non presente negli orari pubblici (forse a vuoto da un deposito vicino)</div></div>
+          <div class="arrow">→</div>
+          <div><div class="t">${d[1]}</div><div class="sub">${numTag(d[0])}per ${esc(d[2])}</div>${infoLine(infoText(d[3]))}</div>
+          <div class="dwell"><div class="info">sosta non nota</div></div></div>`).join("");
+      // bassa: evening arrival with no departure from here: 0 trains counted
+      const arr = o.arr.map(a => `<div class="tr lv2" style="--lvc:${LV[2].c}">${modelCell(o.op, a[3], "")}
+          <div>${lvChip(2, "0 treni")}<div class="t">${a[1]}</div><div class="sub">${numTag(a[0])}da ${esc(a[2])}</div>${infoLine(infoText(a[3]))}</div>
+          <div class="arrow">→</div>
+          <div><div class="lonely">la mattina da qui non riparte nessun treno: forse riparte a vuoto, o è un errore di lettura degli orari</div></div>
+          <div class="dwell"><div class="info">sosta non nota</div></div></div>`).join("");
+      const oavg = o.pairs.length ? dur(Math.round(o.pairs.reduce((s, p) => s + p[6], 0) / o.pairs.length)) : "—";
+      const parts = [[5, "altissima"], [4, "alta"], [3, "media"]].filter(([l]) => o.lv[l]).map(([l, nm]) => `${o.lv[l]} ${nm}`);
+      return `<section class="opsec">
+        <div class="opsec-h">${opLogo(o.op, 30)}<strong>${o.count} ${o.count === 1 ? "treno" : "treni"}</strong><span class="meta">${esc(o.op)}${parts.length ? " · " + parts.join(", ") : ""}${o.low ? ` · ${o.low} a probabilità bassa (0)` : ""} · sosta media ${oavg}</span></div>
+        ${o.pairs.length + o.long.length + o.dep.length + o.arr.length ? `<div class="tbl">
+          <div class="tr head"><div>Treno</div><div>Arriva la sera</div><div></div><div>Riparte il mattino</div><div class="dwell">Sosta</div></div>
+          ${rows}${long}${dep}${arr}
+        </div>` : ""}
+        ${o.pd.map(pdBlock).join("")}</section>`;
+    }).join("");
+    const sureN = shown.reduce((s, o) => s + o.sure, 0), lowN = shown.reduce((s, o) => s + o.low, 0);
 
     $("win").innerHTML = `
       <div class="win-head">
         <button class="depbtn" id="depbtn"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 4l5-2 6 2 5-2v14l-5 2-6-2-5 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 2v14M13 4v14" stroke="currentColor" stroke-width="1.5"/></svg>Guarda deposito</button>
-        <div class="oplogos">${all.byOp.map(o => opLogo(o.op, 26)).concat(pdOps.filter((op, i, a) => a.indexOf(op) === i).map(op => opLogo(op, 26))).join("")}</div>
+        <div class="oplogos">${all.byOp.map(o => opLogo(o.op, 26)).join("")}</div>
         <div class="win-title">
           <div><div class="eyebrow">Notte ${esc(nightText({ weekday: "long", day: "numeric", month: "long" }))}</div>
             <h2 class="stname" id="wtitle">${esc(st.n)}</h2>
@@ -1041,8 +1098,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
           <button class="close" aria-label="Chiudi">×</button>
         </div>
         <div class="kpis">
-          ${!count && pds.length ? `<div class="kpi"><div class="v">${pds.some(p => p.lv === "c") ? "✓" : "~" + pdTrains(pds)}</div><div class="k">${pds.some(p => p.lv === "c") ? "deposito segnalato" : "treni stimati, da verificare"}</div></div>`
-            : `<div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito${probN ? ` · ${probN} probabili` : ""}</div></div>`}
+          <div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito · ${sureN} certi${count > sureN ? `, ${count - sureN} probabili` : ""}${lowN ? ` · ${lowN} prob. bassa (0)` : ""}</div></div>
           <div class="kpi"><div class="v">${deps[0] || "—"}</div><div class="k">prima partenza</div></div>
           <div class="kpi"><div class="v">${avg != null ? dur(avg) : "—"}</div><div class="k">sosta media</div></div>
           <div class="kpi"><div class="v">${longest != null ? dur(longest) : "—"}</div><div class="k">sosta più lunga</div></div>
@@ -1053,8 +1109,8 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         </div>` : ""}
       </div>
       <div class="win-body">
-        ${shown.length ? sections : pds.length ? "" : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
-        ${pdHtml}
+        ${shown.length ? sections : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
+        <div class="lvscale">Probabilità: ${[5, 4, 3, 2, 1].map(l => lvChip(l)).join("")}<span>bassa e bassissima contano 0 treni</span></div>
         <p class="note">Orari stimati dagli orari pubblici: l'abbinamento tra arrivo serale e partenza del mattino segue l'ordine degli orari della stessa azienda.</p>
       </div>`;
     $("win").querySelector(".close").onclick = closeWindow;
@@ -1271,13 +1327,14 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   function methodNote() {
     return `<div class="note">
       <p><strong>Come è calcolato.</strong> Per ogni stazione e per ogni azienda cerchiamo i treni che terminano la corsa la sera senza ripartire e quelli che iniziano la corsa il mattino dopo senza arrivare da un'altra stazione. Arrivi e partenze della stessa azienda sono abbinati in ordine di orario; la sosta è la differenza. È una stima: gli orari pubblici non dicono quale convoglio fa quale corsa.</p>
+      <p><strong>Cinque livelli di probabilità.</strong> <em>Altissima</em>: arrivo la sera e partenza la mattina negli orari, o deposito segnalato dal personale (pallino pieno). <em>Alta</em>: prima partenza all'alba senza arrivo la sera prima. <em>Media</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure deposito possibile dedotto dagli orari. <em>Bassa</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Bassissima</em>: deposito possibile con un indizio debole. I livelli incerti sono tratteggiati; bassa e bassissima contano 0 treni (cerchio puntinato).</p>
       <p><strong>Depositi possibili e segnalati.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono i <em>depositi possibili</em>, con una stima del numero di treni, da verificare. I depositi <em>segnalati</em> sono quelli confermati dal personale.</p>
       <p><strong>Fonti.</strong> Orari regionali Trenitalia (14 novembre – 12 dicembre 2026, con Tper, TUA, SAD e TFT); GTFS ufficiali di Trenord, EAV, ARST e Trentino Trasporti; programmi di esercizio 2026 di Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria e FAL dal portale open data della Regione Puglia; orari PDF della Circumetnea (dal 16 marzo 2026, solo feriali) e di Ferrovie della Calabria (Catanzaro e Cosenza, considerati dal lunedì al sabato perché l'orario non indica i giorni).</p>
     </div>`;
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.2.0";
+  const APP_VERSION = "2.3.0";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
