@@ -1042,7 +1042,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       const l = p.lv === "c" ? 5 : p.lv === "p" ? 3 : 1;
       const n = l === 1 ? 0 : (p.n || 1);
       return `<section class="pdsec${p.lv === "c" ? " ok" : ""}">
-        <div>${lvChip(l)}<span class="chip ${p.lv === "c" ? "okchip" : "pdchip"}">${p.lv === "c" ? "segnalato dal personale" : "deposito possibile"}</span></div>
+        <div>${lvChip(l)}<span class="chip pdchip">deposito possibile</span></div>
         <div class="big">${p.lv === "c" ? (p.n ? `${p.n} treni` : "Treni in sosta notturna (contato 1)") : `${n} ${n === 1 ? "treno" : "treni"} contati${l === 3 ? " (stima)" : ""}`}</div>
         ${p.why.length ? `<ul>${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
         ${p.yard ? `<div class="lonely">Qui ci sono circa ${p.yard >= 1000 ? (p.yard / 1000).toFixed(1).replace(".", ",") + " km" : p.yard + " m"} di binari di sosta (OpenStreetMap).</div>` : ""}
@@ -1327,14 +1327,14 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   function methodNote() {
     return `<div class="note">
       <p><strong>Come è calcolato.</strong> Per ogni stazione e per ogni azienda cerchiamo i treni che terminano la corsa la sera senza ripartire e quelli che iniziano la corsa il mattino dopo senza arrivare da un'altra stazione. Arrivi e partenze della stessa azienda sono abbinati in ordine di orario; la sosta è la differenza. È una stima: gli orari pubblici non dicono quale convoglio fa quale corsa.</p>
-      <p><strong>Cinque livelli di probabilità.</strong> <em>Altissima</em>: arrivo la sera e partenza la mattina negli orari, o deposito segnalato dal personale (pallino pieno). <em>Alta</em>: prima partenza all'alba senza arrivo la sera prima. <em>Media</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure deposito possibile dedotto dagli orari. <em>Bassa</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Bassissima</em>: deposito possibile con un indizio debole. I livelli incerti sono tratteggiati; bassa e bassissima contano 0 treni (cerchio puntinato).</p>
-      <p><strong>Depositi possibili e segnalati.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono i <em>depositi possibili</em>, con una stima del numero di treni, da verificare. I depositi <em>segnalati</em> sono quelli confermati dal personale.</p>
+      <p><strong>Cinque livelli di probabilità.</strong> <em>Altissima</em>: arrivo la sera e partenza la mattina negli orari (pallino pieno). <em>Alta</em>: prima partenza all'alba senza arrivo la sera prima. <em>Media</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure deposito possibile dedotto dagli orari. <em>Bassa</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Bassissima</em>: deposito possibile con un indizio debole. I livelli incerti sono tratteggiati; bassa e bassissima contano 0 treni (cerchio puntinato).</p>
+      <p><strong>Depositi possibili.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono i <em>depositi possibili</em>, con una stima del numero di treni, da verificare.</p>
       <p><strong>Fonti.</strong> Orari regionali Trenitalia (14 novembre – 12 dicembre 2026, con Tper, TUA, SAD e TFT); GTFS ufficiali di Trenord, EAV, ARST e Trentino Trasporti; programmi di esercizio 2026 di Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria e FAL dal portale open data della Regione Puglia; orari PDF della Circumetnea (dal 16 marzo 2026, solo feriali) e di Ferrovie della Calabria (Catanzaro e Cosenza, considerati dal lunedì al sabato perché l'orario non indica i giorni).</p>
     </div>`;
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.3.0";
+  const APP_VERSION = "2.3.1";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
