@@ -11,6 +11,7 @@
 <meta name="apple-mobile-web-app-title" content="SleepyTrain">
 <meta name="format-detection" content="telephone=no">
 <meta name="claude:viewport-fit-sides" content="cover">
+<script>try { if (localStorage.getItem("theme") === "light") document.documentElement.setAttribute("data-theme", "light"); } catch (e) { }</script>
 <link rel="stylesheet" href="fonts.css">
 <style>
 /* Layout: sticky departure-board header, map of Italy on the left, national summary on the right (stacked on phones).
@@ -60,6 +61,8 @@ button { cursor: pointer; }
 .btn:hover { border-color: var(--amber-dim); }
 .btn.now { color: var(--amber); }
 input[type=date], select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+.day { display: flex; align-items: center; gap: 6px; }
+.wday { font-family: var(--f-display); font-weight: 700; font-size: 17px; letter-spacing: .04em; color: var(--amber); white-space: nowrap; }
 
 .banner { display: none; background: #3a2a10; color: #ffd9a0; border-bottom: 1px solid var(--amber-dim);
   padding-top: 8px; padding-bottom: 8px; padding-left: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px)); font-size: 13px; }
@@ -317,14 +320,51 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   .win { animation: rise .16s ease-out; }
   @keyframes rise { from { transform: translateY(8px); opacity: .6; } }
 }
+/* ---------- light colours (button ☀ in the header; the choice is remembered) ---------- */
+:root[data-theme="light"] {
+  --bg: #d6e1ee;
+  --panel: #ffffff;
+  --panel-2: #f2f5fa;
+  --line: #d3dae6;
+  --land: #ffffff;
+  --land-edge: #9fb0c8;
+  --fg: #172033;
+  --muted: #5d6a82;
+  --amber: #b86e00;
+  --amber-dim: #e2a24a;
+  --green: #1d9461;
+  color-scheme: light;
+}
+[data-theme="light"] .others { fill: #eef1f5; stroke: #c3cddb; }
+[data-theme="light"] .reg { stroke: #b7c4d8; }
+[data-theme="light"] .reg.dim, [data-theme="light"] .reg.off:hover { fill: rgba(220, 227, 238, .65); }
+[data-theme="light"] .reg:hover { fill: rgba(184, 110, 0, .06); }
+[data-theme="light"] .reg.on { fill: rgba(184, 110, 0, .07); }
+[data-theme="light"] .lab.t3 { fill: #34405a; }
+[data-theme="light"] .st { stroke: #ffffff; }
+[data-theme="light"] .pie path { stroke: #ffffff; }
+[data-theme="light"] .st.pd { fill: rgba(255, 255, 255, .7) !important; }
+[data-theme="light"] .st.lowdash { fill: rgba(255, 255, 255, .6) !important; }
+[data-theme="light"] .st.lowdot { stroke: #ffffff; }
+[data-theme="light"] .legend, [data-theme="light"] .mapfilters input, [data-theme="light"] .mapfilters select { background: rgba(255, 255, 255, .94); }
+[data-theme="light"] .banner { background: #fff4e0; color: #7a4a00; }
+[data-theme="light"] .modal { background: rgba(23, 32, 51, .45); }
+[data-theme="light"] .chipbtn[aria-pressed="true"] { background: #fff1db; }
+[data-theme="light"] .chip.lvchip, [data-theme="light"] .chip.pdchip { filter: brightness(.62) saturate(1.3); }
+[data-theme="light"] .chart .area { fill: rgba(184, 110, 0, .18); }
+[data-theme="light"] .sugg, [data-theme="light"] .picker { box-shadow: 0 10px 26px rgba(23, 32, 51, .18); }
+[data-theme="light"] .tr.prob { background: repeating-linear-gradient(135deg, transparent 0 10px, rgba(184, 110, 0, .06) 10px 20px); }
+[data-theme="light"] .oplogo { box-shadow: 0 0 0 1px var(--line); }
+[data-theme="light"] .depbtn { color: #ffffff; }
 </style>
 
 <header class="top">
   <div class="brand"><img class="logo" src="logo.svg" alt="" width="36" height="36"><h1>SleepyTrain</h1></div>
   <div class="nightctl">
     <button class="btn" id="prev" aria-label="Giorno precedente">◀</button>
-    <label class="day"><span class="lbl">Notte del</span><input type="date" id="pick" aria-label="Scegli il giorno"></label>
+    <label class="day"><span class="lbl">Notte del</span><input type="date" id="pick" aria-label="Scegli il giorno"><span class="wday" id="wday" aria-hidden="true"></span></label>
     <button class="btn" id="next" aria-label="Giorno successivo">▶</button>
+    <button class="btn" id="themebtn" aria-label="Colori chiari o scuri" title="Colori chiari / scuri">☀</button>
     <button class="btn" id="infobtn" aria-label="Informazioni sull'app" title="Informazioni">ⓘ</button>
   </div>
 </header>
@@ -1385,7 +1425,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.7.0";
+  const APP_VERSION = "2.8.0";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
@@ -1424,6 +1464,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   // ---------- controlli ----------
   function render() {
     $("pick").value = night;
+    $("wday").textContent = "· " + ["DOM", "LUN", "MAR", "MER", "GIO", "VEN", "SAB"][new Date(night + "T12:00:00Z").getUTCDay()];
     const e = effective(night);
     const b = $("banner");
     if (e.mapped) {
@@ -1434,6 +1475,17 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     renderPanel();
     if (selected) renderWindow();
   }
+  // light / dark colours: the button shows the theme it switches to
+  const themeIcon = () => { $("themebtn").textContent = document.documentElement.getAttribute("data-theme") === "light" ? "☾" : "☀"; };
+  themeIcon();
+  $("themebtn").onclick = () => {
+    const light = document.documentElement.getAttribute("data-theme") !== "light";
+    if (light) document.documentElement.setAttribute("data-theme", "light"); else document.documentElement.removeAttribute("data-theme");
+    try { localStorage.setItem("theme", light ? "light" : "dark"); } catch (e) { }
+    themeIcon();
+    const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.setAttribute("content", light ? "#ffffff" : "#111a2c");
+    if (DATA) { drawStations(); renderPanel(); }
+  };
   $("prev").onclick = () => { night = addDays(night, -1); render(); };
   $("next").onclick = () => { night = addDays(night, 1); render(); };
   $("pick").onchange = (e) => { if (e.target.value) { night = e.target.value; render(); } };
