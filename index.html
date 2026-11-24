@@ -254,7 +254,10 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 .chip.probchip { background: rgba(255, 181, 71, .18); color: var(--amber); margin: 0 0 4px; }
 /* possible depots (deduced) and depots reported by the staff: dashed rings */
 .st.pd { fill: rgba(11, 18, 32, .55) !important; stroke-dasharray: 3 2.2; stroke-width: 2.2; stroke-opacity: 1; }
-.st.lowdot { fill-opacity: .55; stroke: #0b1220; stroke-width: .6; stroke-opacity: .6; }
+/* bassa / molto bassa (0 trains): almost transparent, they must look "not active" */
+.st.lowdot { fill-opacity: .16; stroke: currentColor; stroke-width: .7; stroke-opacity: .3; }
+.st.lowdot:hover { fill-opacity: .45; }
+.lab.low { opacity: .45; }
 .st.lowdot.sel { fill: #fff !important; fill-opacity: 1; }
 .pdring { fill: none; stroke-dasharray: 3 2.2; stroke-width: 1.8; vector-effect: non-scaling-stroke; pointer-events: none; }
 .pdring.lowring { stroke-dasharray: 1 2.5; opacity: .7; }
@@ -345,7 +348,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       <span>colori delle aziende</span>
       <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="#9cc0ff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>
       <span>probabili</span>
-      <svg width="10" height="16"><circle cx="5" cy="8" r="2" fill="#9aa6c0" fill-opacity=".7"/></svg>
+      <svg width="10" height="16"><circle cx="5" cy="8" r="2.4" fill="#9aa6c0" fill-opacity=".2" stroke="#9aa6c0" stroke-opacity=".35" stroke-width=".7"/></svg>
       <span>prob. bassa (0)</span>
     </div>
   </div>
@@ -717,11 +720,11 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         const rad = only0 ? lowPx / ppu : radOf(n.count, st.t);
         if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
         const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st " + (only0 ? "lowdot" : "pd") + (st === selected ? " sel" : "") }, gSt);
-        if (mainOp) { if (only0) dot.style.fill = opInfo(mainOp).c; else dot.style.stroke = opInfo(mainOp).c; }
+        if (mainOp) { if (only0) { dot.style.fill = opInfo(mainOp).c; dot.style.color = opInfo(mainOp).c; } else dot.style.stroke = opInfo(mainOp).c; }
         dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
         el("title", {}, dot).textContent = only0 ? `${st.n}: probabilità bassa, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
         // names of the low-probability places only when zoomed in close (about 120 km across)
-        if (only0 ? (st === selected || spanKm < 120) : labelRule(st)) labels.push({ st, rad, faded: false, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
+        if (only0 ? (st === selected || spanKm < 120) : labelRule(st)) labels.push({ st, rad, faded: false, low: only0 && st !== selected, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
         continue;
       }
       const c = n.sure;
@@ -768,7 +771,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       const w = L.st.n.length * fs * 0.55 + 4;
       const x = L.st.x + L.rad + 3 / ppu, y = L.st.y + fs * 0.35 / ppu;
       if (L.st !== selected && !fits(x, y, w, fs)) continue;
-      const t = el("text", { x, y, class: "lab t" + L.st.t + (L.faded ? " faded" : ""), "font-size": fs / ppu }, gLab);
+      const t = el("text", { x, y, class: "lab t" + L.st.t + (L.faded ? " faded" : "") + (L.low ? " low" : ""), "font-size": fs / ppu }, gLab);
       t.style.strokeWidth = (3 / ppu) + "px";
       t.textContent = L.st.n;
     }
@@ -1338,7 +1341,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.4.1";
+  const APP_VERSION = "2.4.2";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
