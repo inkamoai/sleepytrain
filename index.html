@@ -67,7 +67,12 @@ input[type=date], select { background: var(--panel-2); border: 1px solid var(--l
 
 .main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: calc(100vh - 58px); min-height: 480px; }
 .mapwrap { position: relative; min-width: 0; border-right: 1px solid var(--line); overflow: hidden; touch-action: none; background: var(--bg); }
-#map { width: 100%; height: 100%; display: block; min-height: 420px; cursor: grab; user-select: none; }
+#map { width: 100%; height: 100%; display: block; min-height: 420px; cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; outline: none; }
+/* no blue tap highlight / selection box on phones */
+* { -webkit-tap-highlight-color: transparent; }
+.mapwrap, .mapwrap * { -webkit-user-select: none; -webkit-touch-callout: none; }
+.mapwrap input { -webkit-user-select: text; }
+#map *:focus, #map:focus { outline: none; }
 #map.drag { cursor: grabbing; }
 .land { fill: var(--land); stroke: var(--land-edge); stroke-width: .8; vector-effect: non-scaling-stroke; }
 .others { fill: #121c30; stroke: #1d2a44; stroke-width: .6; vector-effect: non-scaling-stroke; }
@@ -617,7 +622,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     if (near.length === 1) { openStation(near[0]); return; }
     if (near.length > 1) { showPicker(near.slice(0, 6), e.clientX, e.clientY); return; }
     // inside the region already shown: keep the current zoom, do nothing
-    if (regionName && regionName !== region) setRegion(regionName);
+    if (regionName && regionName !== region) setRegion(regionName, true);
   }
   // several towns under the finger: let the user pick one from a short list
   function showPicker(list, cx, cy) {
@@ -735,7 +740,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         if (bop) { if (only0 && !bassa) { dot.style.fill = opInfo(bop).c; dot.style.color = opInfo(bop).c; } else dot.style.stroke = opInfo(bop).c; }
         const inert = only0 && !bassa && spanKm >= IMPROB_KM && st !== selected;
         if (inert) dot.classList.add("inert");
-        else dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
+        else dot.addEventListener("click", (e) => { e.stopPropagation(); mapTap(e, null); });
         el("title", {}, dot).textContent = only0 ? `${st.n}: deposito ${bassa ? "possibile" : "improbabile"}, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
         // names: "possibile" when zoomed in close (about 120 km across), "improbabile" only when it can be tapped
         if (only0 ? (st === selected || spanKm < (bassa ? 120 : IMPROB_KM)) : labelRule(st)) labels.push({ st, rad, faded: false, low: only0 && !bassa && st !== selected, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
@@ -772,7 +777,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         ring.style.stroke = opInfo(unc.op).c;
       }
       if (!faded) {
-        dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
+        dot.addEventListener("click", (e) => { e.stopPropagation(); mapTap(e, null); });
         el("title", {}, dot).textContent = `${st.n}: ${n.sure} treni certi` + (n.count > n.sure ? `, ${n.count - n.sure} probabili` : "") + (n.byOp.length ? " (" + n.byOp.map(o => opInfo(o.op).s + " " + o.count).join(", ") + ")" : "");
       }
       // label rules: big cities always; medium from a regional zoom; towns only when zoomed in
@@ -815,14 +820,25 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   }
   svg.addEventListener("wheel", (e) => { e.preventDefault(); const p = toUser(e.clientX, e.clientY); zoomAt(e.deltaY < 0 ? 1.25 : 0.8, p.x, p.y); }, { passive: false });
   const ptrs = new Map(); let lastPinch = null;
-  svg.addEventListener("pointerdown", (e) => { closePicker(); if (e.target.classList.contains("st")) return; dragged = false; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }); });
+  // a gesture starts with the first finger and ends when the last one lifts: "dragged" stays true for the
+  // whole gesture (pinch included), so lifting the fingers is never taken as a tap that re-frames the map
+  svg.addEventListener("pointerdown", (e) => {
+    closePicker();
+    // first finger of a new touch: forget anything left over from the previous gesture
+    if (e.isPrimary || ptrs.size === 0) { ptrs.clear(); dragged = false; lastPinch = null; }
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY });
+    if (ptrs.size > 1) dragged = true;
+    // every finger stays attached to the map itself: the dots are redrawn while zooming, and a finger
+    // attached to a dot that no longer exists would lose its "lift" event
+    try { svg.setPointerCapture(e.pointerId); } catch (_) { }
+  });
   svg.addEventListener("pointermove", (e) => {
     if (!ptrs.has(e.pointerId)) return;
     const prev = ptrs.get(e.pointerId);
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: prev.x0, y0: prev.y0 });
     if (ptrs.size === 1) {
       const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
-      if (!dragged && Math.abs(e.clientX - prev.x0) + Math.abs(e.clientY - prev.y0) > 4) { dragged = true; svg.classList.add("drag"); try { svg.setPointerCapture(e.pointerId); } catch (_) {} }
+      if (!dragged && Math.abs(e.clientX - prev.x0) + Math.abs(e.clientY - prev.y0) > 8) { dragged = true; svg.classList.add("drag"); }
       if (!dragged) return;
       const ppu = pxPerUnit();
       vb.x -= dx / ppu; vb.y -= dy / ppu; applyVB();
@@ -833,7 +849,13 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       lastPinch = d; dragged = true;
     }
   });
-  const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = null; svg.classList.remove("drag"); };
+  const up = (e) => {
+    ptrs.delete(e.pointerId);
+    if (ptrs.size < 2) lastPinch = null;
+    // one finger left after a pinch: continue as a drag from where it is now (no jump)
+    if (ptrs.size === 1) { const [id, p] = [...ptrs.entries()][0]; ptrs.set(id, { x: p.x, y: p.y, x0: p.x, y0: p.y }); }
+    if (ptrs.size === 0) svg.classList.remove("drag");
+  };
   svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
   $("zin").onclick = () => zoomAt(1.5, vb.x + vb.w / 2, vb.y + vb.h / 2);
   $("zout").onclick = () => zoomAt(1 / 1.5, vb.x + vb.w / 2, vb.y + vb.h / 2);
@@ -851,7 +873,13 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     vb.x = cx - vb.w / 2;
     applyVB();
   }).observe($("mapwrap"));
-  svg.addEventListener("click", (e) => { if (!e.target.classList.contains("st")) mapTap(e, null); });
+  // with the fingers attached to the map, taps arrive here: find the region under the finger
+  const regionAt = (x, y) => {
+    const els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [document.elementFromPoint(x, y)];
+    const r = els.find(el => el && el.classList && el.classList.contains("reg"));
+    return r ? r.dataset.r : null;
+  };
+  svg.addEventListener("click", (e) => { if (!e.target.classList.contains("st") && !e.target.classList.contains("reg")) mapTap(e, regionAt(e.clientX, e.clientY)); });
 
   // ---------- pannello nazionale ----------
   const nightText = (fmt) => `${fmtDay(night, fmt)} → ${fmtDay(addDays(night, 1), fmt)}`;
@@ -988,7 +1016,9 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       o.textContent = o.value ? o.value + (ok ? "" : " — nessun treno " + opFilter) : "Tutta Italia";
     });
   }
-  function setRegion(r) {
+  // fromTap: chosen by tapping the map. If the user is already zoomed in closer than the whole region,
+  // keep the view where it is (only the region changes): the map never jumps back by itself
+  function setRegion(r, fromTap) {
     if (!regionAllowed(r)) { $("regfilter").value = region; return; }
     region = r;
     $("regfilter").value = r;    if (r) {
@@ -997,7 +1027,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       const ar = aspect(svg.getBoundingClientRect());
       let w = x1 - x0 + pad * 2, h = y1 - y0 + pad * 2;
       if (w / h < ar) w = h * ar; else h = w / ar;
-      vb = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h };
+      if (!(fromTap && vb && vb.w <= w)) vb = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h };
       applyVB();
     } else fitView();
     renderPanel();
@@ -1355,7 +1385,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.6.0";
+  const APP_VERSION = "2.6.1";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
