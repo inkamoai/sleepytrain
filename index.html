@@ -1,0 +1,1382 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SleepyTrain</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<meta name="theme-color" content="#111a2c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="SleepyTrain">
+<meta name="format-detection" content="telephone=no">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="fonts.css">
+<style>
+/* Layout: sticky departure-board header, map of Italy on the left, national summary on the right (stacked on phones).
+   A station opens in a modal window grouped by operator. Deliberately single night theme. */
+:root {
+  --bg: #0b1220;
+  --panel: #111a2c;
+  --panel-2: #16223a;
+  --line: #24324f;
+  --land: #17243d;
+  --land-edge: #2f4266;
+  --fg: #e6ebf5;
+  --muted: #8d9bb8;
+  --amber: #ffb547;
+  --amber-dim: #a8742a;
+  --green: #5fd39a;
+  --f-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 14px; line-height: 1.45; }
+body::before { content: ""; position: fixed; top: 0; right: 0; left: 0; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+body.modal-open { overflow: hidden; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.top {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+  padding-top: 8px; padding-bottom: 8px;
+  padding-left: 12px; padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: 12px; padding-right: max(12px, env(safe-area-inset-right, 0px));
+  /* wrap: on a narrow screen the date bar moves under the name instead of overlapping it */
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+}
+.brand { display: flex; align-items: center; gap: 8px; flex: none; }
+.brand h1 { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 24px; letter-spacing: .01em; white-space: nowrap; }
+.brand .logo { width: 36px; height: 36px; border-radius: 9px; display: block; flex: none; }
+.nightctl { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; margin-left: auto; }
+.nightctl .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; }
+.nightctl .night { font-family: var(--f-display); font-size: 20px; font-weight: 600; min-width: 11ch; text-align: center; }
+.btn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; }
+.btn:hover { border-color: var(--amber-dim); }
+.btn.now { color: var(--amber); }
+input[type=date], select { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+
+.banner { display: none; background: #3a2a10; color: #ffd9a0; border-bottom: 1px solid var(--amber-dim);
+  padding-top: 8px; padding-bottom: 8px; padding-left: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px)); font-size: 13px; }
+.banner.on { display: block; }
+
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; height: calc(100vh - 58px); min-height: 480px; }
+.mapwrap { position: relative; min-width: 0; border-right: 1px solid var(--line); overflow: hidden; touch-action: none; background: var(--bg); }
+#map { width: 100%; height: 100%; display: block; min-height: 420px; cursor: grab; user-select: none; }
+#map.drag { cursor: grabbing; }
+.land { fill: var(--land); stroke: var(--land-edge); stroke-width: .8; vector-effect: non-scaling-stroke; }
+.others { fill: #121c30; stroke: #1d2a44; stroke-width: .6; vector-effect: non-scaling-stroke; }
+.st { fill: var(--amber); fill-opacity: .85; stroke: #000; stroke-opacity: .5; vector-effect: non-scaling-stroke; cursor: pointer; }
+.st:hover { fill: #ffd28a; }
+.st.multi { stroke: #fff; stroke-opacity: .9; stroke-width: 1.4; }
+.st.sel { fill: #fff; stroke: var(--amber); stroke-width: 2; stroke-opacity: 1; }
+.glow { fill: var(--amber); opacity: .18; pointer-events: none; }
+.st.faded { fill: var(--muted); fill-opacity: .35; stroke-opacity: .2; pointer-events: none; cursor: default; }
+.st { fill-opacity: .92; stroke: #0b1220; stroke-opacity: .8; stroke-width: 1; }
+.st.multi { stroke: #fff; stroke-opacity: .95; stroke-width: 1.6; }
+.pie { pointer-events: none; }
+.pie path { stroke: #0b1220; stroke-width: .6; vector-effect: non-scaling-stroke; }
+.oplogos { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.oplogo { display: block; width: auto; max-width: 150px; object-fit: contain; background: #fff; border-radius: 6px; padding: 3px 6px; }
+.model { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.model img { width: 100%; max-width: 116px; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; background: var(--panel-2); }
+.model .mname { font-size: 11.5px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.model .mkind { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.photoview { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 60; background: rgba(3, 7, 15, .9); display: grid; place-items: center; padding: 16px; cursor: zoom-out; }
+.photoview figure { margin: 0; max-width: 100%; max-width: min(900px, 100%); }
+.photoview img { width: 100%; height: auto; border-radius: 10px; display: block; }
+.photoview figcaption { color: var(--fg); font-size: 13px; margin-top: 8px; }
+.photoview figcaption span { color: var(--muted); font-size: 12px; }
+.day { display: inline-flex; align-items: center; gap: 6px; }
+
+/* "Guarda deposito": local map of the station area */
+.depbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--amber); color: #1a1203; border: 0; border-radius: 8px; padding: 9px 14px; font-family: var(--f-display); font-size: 17px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; align-self: flex-start; }
+.depbtn:hover { filter: brightness(1.08); }
+.depbtn svg { flex: none; }
+.depview { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 70; background: var(--bg); display: flex; flex-direction: column; }
+.dep-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; padding-top: 10px; padding-top: max(10px, env(safe-area-inset-top, 0px)); background: var(--panel); border-bottom: 1px solid var(--line); }
+.dep-head h2 { margin: 0; font-family: var(--f-display); font-size: 22px; line-height: 1.1; flex: 1; min-width: 0; }
+.dep-head .eyebrow { display: block; }
+.depmap { position: relative; flex: 1; min-height: 0; touch-action: none; overflow: hidden; }
+.depmap svg { width: 100%; height: 100%; display: block; cursor: grab; }
+.depmap .ui { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.depmap .ui .btn { width: 38px; height: 38px; padding: 0; font-size: 18px; }
+.dep-foot { background: var(--panel); border-top: 1px solid var(--line); padding: 10px 12px; padding-bottom: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+.dep-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.dep-legend i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.dep-legend i.box { height: 12px; width: 16px; border-radius: 3px; }
+.dep-note { color: var(--muted); }
+.d-water { fill: #17365e; }
+.d-rland { fill: #3b2a33; }
+.d-bld { fill: #223050; }
+.d-minor { fill: none; stroke: #2c3c5c; stroke-linecap: round; stroke-linejoin: round; }
+.d-road { fill: none; stroke: #4b5d80; stroke-linecap: round; stroke-linejoin: round; }
+.d-plat { fill: #8a97b6; }
+.d-main { fill: none; stroke: #d6dcea; stroke-linecap: round; stroke-linejoin: round; }
+.d-yard { fill: none; stroke: #ffb547; stroke-linecap: round; stroke-linejoin: round; }
+.d-yardglow { fill: none; stroke: #ffb547; stroke-opacity: .25; stroke-linecap: round; stroke-linejoin: round; }
+.d-poi { fill: #fff; stroke: #0b1220; }
+.onsat .d-yard { stroke-opacity: .85; }
+.onsat .d-yardglow { stroke-opacity: .18; }
+.dep-modes { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.d-poilab { fill: #fff; font-family: var(--f-display); font-weight: 700; paint-order: stroke; stroke: #0b1220; }
+.lab.t1 { font-weight: 700; }
+.lab.t3 { font-weight: 500; fill: #c9d2e6; }
+.lab.faded { fill: var(--muted); opacity: .6; }
+.lab { fill: var(--fg); font-family: var(--f-display); font-weight: 600; paint-order: stroke; stroke: var(--bg); pointer-events: none; }
+.mapui { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.mapui .btn { width: 34px; height: 34px; padding: 0; font-size: 18px; }
+.legend { position: absolute; left: 12px; bottom: 12px; background: rgba(17, 26, 44, .88); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12px; color: var(--muted); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; max-width: calc(100% - 24px); }
+.legend svg { display: block; }
+.mapfilters { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap; width: calc(100% - 70px); width: min(560px, calc(100% - 70px)); }
+.qwrap { position: relative; flex: 1 1 180px; min-width: 0; }
+.mapfilters input { width: 100%; box-sizing: border-box; background: rgba(17, 26, 44, .92); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.sugg { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 7; max-height: 320px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--amber-dim); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+.sugg button { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%; background: none; border: 0;
+  border-top: 1px solid var(--line); padding: 11px 12px; text-align: left; font-size: 15px; }
+.sugg button:first-child { border-top: 0; }
+.sugg button.act, .sugg button:hover { background: var(--panel-2); color: var(--amber); }
+.sugg b { color: var(--amber); font-weight: 700; }
+.sugg .rg { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.sugg .none { padding: 11px 12px; color: var(--muted); font-size: 14px; }
+.mapfilters select { flex: 0 1 auto; border-radius: 8px; padding: 8px; background: rgba(17, 26, 44, .92); }
+
+.panel { background: var(--panel); min-width: 0; overflow-y: auto; max-height: calc(100vh - 58px);
+  padding-top: 18px; padding-bottom: 18px; padding-left: 18px; padding-right: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 18px; }
+.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.stname { font-family: var(--f-display); font-size: 32px; font-weight: 700; line-height: 1.05; margin: 2px 0 0; text-wrap: balance; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.kpi { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
+.kpi .v { font-family: var(--f-mono); font-size: 24px; font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; }
+.kpi .k { font-size: 11px; color: var(--muted); }
+h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.list { display: flex; flex-direction: column; }
+.list button { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; text-align: left; background: none; border: 0; border-top: 1px solid var(--line); padding: 8px 2px; }
+.list button:hover .nm { color: var(--amber); }
+.list .c { font-family: var(--f-mono); color: var(--amber); font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }
+.dots { display: flex; gap: 3px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; display: block; }
+.oplist { display: flex; flex-direction: column; gap: 6px; }
+.oprow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.oprow .bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.oprow .bar i { display: block; height: 100%; }
+.oprow .c { font-family: var(--f-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.note { font-size: 12px; color: var(--muted); }
+.note p { margin: 0 0 6px; }
+.loading { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--f-display); font-size: 20px; letter-spacing: .05em; }
+
+/* regions on the map */
+.reg { fill: transparent; stroke: #3a4f78; stroke-width: .7; vector-effect: non-scaling-stroke; cursor: pointer; }
+.reg:hover { fill: rgba(255, 181, 71, .06); }
+.reg.on { fill: rgba(255, 181, 71, .09); stroke: var(--amber); stroke-width: 1.6; }
+.reg.dim { fill: rgba(11, 18, 32, .55); }
+.reg.off { cursor: default; }
+.reg.off:hover { fill: rgba(11, 18, 32, .55); }
+.reglab { fill: var(--muted); font-family: var(--f-display); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; pointer-events: none; opacity: .7; paint-order: stroke; stroke: var(--bg); stroke-width: 2px; }
+
+/* "which station?" picker for crowded taps */
+.picker { position: absolute; z-index: 6; min-width: 200px; max-width: calc(100% - 16px); background: var(--panel); border: 1px solid var(--amber-dim); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,.5); overflow: hidden; }
+.picker-h { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 8px 12px 4px; }
+.picker button { display: flex; justify-content: space-between; gap: 16px; width: 100%; background: none; border: 0; border-top: 1px solid var(--line); padding: 12px; text-align: left; font-size: 15px; }
+.picker button:active, .picker button:hover { background: var(--panel-2); color: var(--amber); }
+.picker .c { font-family: var(--f-mono); color: var(--amber); }
+
+/* night occupancy chart */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .area { fill: rgba(255, 181, 71, .22); }
+.chart .ln { fill: none; stroke: var(--amber); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.chart .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .ax { fill: var(--muted); font-family: var(--f-mono); font-size: 10px; }
+.chart .now { stroke: var(--green); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.chart .cross { stroke: var(--fg); stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .6; }
+.chart .dot { fill: var(--amber); stroke: var(--panel); stroke-width: 2; }
+.tip { position: absolute; pointer-events: none; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 12px; white-space: nowrap; transform: translate(-50%, -110%); }
+.tip b { font-family: var(--f-mono); color: var(--amber); }
+.regbars { display: flex; flex-direction: column; }
+.regbars button { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) 3.5ch; gap: 8px; align-items: center; background: none; border: 0; padding: 3px 0; text-align: left; font-size: 12.5px; }
+.regbars button:hover .rn { color: var(--amber); }
+.regbars .bar { height: 8px; border-radius: 0 4px 4px 0; background: var(--amber); opacity: .85; }
+.regbars .c { font-family: var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.regbars .rn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* operator badge */
+.badge { display: inline-flex; align-items: center; gap: 6px; font-family: var(--f-display); font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--op); color: var(--op-fg, #fff); border-radius: 5px; padding: 2px 8px; white-space: nowrap; line-height: 1.4; }
+.badge.sm { font-size: 11px; padding: 0 6px; }
+
+/* station window */
+.modal { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 50; display: grid; place-items: center; background: rgba(3, 7, 15, .72);
+  padding-top: 16px; padding-top: max(16px, env(safe-area-inset-top, 0px)); padding-bottom: 16px; padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  padding-left: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.modal[hidden] { display: none; }
+[hidden] { display: none !important; }
+.win { width: 100%; width: min(860px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 24px 60px rgba(0,0,0,.5); overflow: hidden; }
+.win-head { padding: 16px 18px 12px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; background: var(--panel-2); }
+.win-title { display: flex; align-items: flex-start; gap: 12px; }
+.win-title > div { flex: 1; min-width: 0; }
+.aka { font-size: 12px; color: var(--muted); }
+.close { width: 36px; height: 36px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 20px; line-height: 1; flex: none; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chipbtn { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 4px 3px 4px; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.chipbtn .n { font-family: var(--f-mono); padding-right: 6px; color: var(--fg); }
+.chipbtn.all { padding: 3px 10px; }
+.chipbtn[aria-pressed="true"] { border-color: var(--amber); background: #2e2d2f; }
+.win-body { overflow-y: auto; padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 20px; }
+.opsec { display: flex; flex-direction: column; gap: 8px; }
+.opsec-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.opsec-h .meta { color: var(--muted); font-size: 12px; }
+.tbl { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tr { display: grid; grid-template-columns: 122px minmax(0, 1fr) 18px minmax(0, 1fr) 64px; gap: 10px; align-items: start; padding: 10px; border-top: 1px solid var(--line); }
+.tr:first-child { border-top: 0; }
+.tr.head { background: var(--panel-2); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; padding-top: 6px; padding-bottom: 6px; align-items: center; }
+.tr.live { background: rgba(95, 211, 154, .09); }
+.t { font-family: var(--f-mono); font-size: 16px; font-weight: 600; color: var(--amber); font-variant-numeric: tabular-nums; }
+.sub { font-size: 12.5px; color: var(--fg); overflow-wrap: anywhere; }
+.info { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+.num { font-family: var(--f-mono); font-size: 11px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-right: 5px; }
+.arrow { color: var(--muted); text-align: center; padding-top: 2px; }
+.dwell { text-align: right; }
+.dwell .d { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 14px; }
+.chip { display: inline-block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; border-radius: 999px; padding: 1px 7px; margin-top: 4px; }
+.chip.in { background: rgba(95, 211, 154, .22); color: var(--green); }
+.chip.gone { background: var(--panel-2); color: var(--muted); }
+.chip.wait { background: rgba(255, 181, 71, .18); color: var(--amber); }
+.empty { color: var(--muted); padding: 6px 0; }
+.lonely { color: var(--muted); font-size: 12px; font-style: italic; }
+.tr.prob { background: repeating-linear-gradient(135deg, transparent 0 10px, rgba(255, 181, 71, .05) 10px 20px); }
+.chip.probchip { background: rgba(255, 181, 71, .18); color: var(--amber); margin: 0 0 4px; }
+
+@media (max-width: 860px) {
+  .top { position: static; }
+  .main { grid-template-columns: minmax(0, 1fr); }
+  .main { height: auto; }
+  .mapwrap { border-right: 0; border-bottom: 1px solid var(--line); height: calc(100vh - 64px); height: calc(100svh - 64px); min-height: 420px; }
+  #map { min-height: 0; }
+  .panel { max-height: none; padding-left: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .nightctl { gap: 4px; }
+  .day .lbl { display: none; }
+  .brand h1 { font-size: 19px; }
+  .nightctl .btn { padding: 5px 8px; }
+  input[type=date] { max-width: 132px; }
+  .qwrap { flex-basis: 100%; }
+  .mapfilters select { flex: 1 1 40%; min-width: 0; padding: 6px; }
+  .modal { padding: 0; place-items: stretch; }
+  .win { width: 100%; height: 100%; border-radius: 0; border: 0; }
+  .win-head { padding-top: 16px; padding-top: max(16px, env(safe-area-inset-top, 0px)); }
+  .tr { grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); }
+  .tr .model { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 10px; }
+  .tr .model img { width: 104px; flex: none; }
+  .tr .dwell { grid-column: 1 / -1; text-align: left; display: flex; gap: 8px; align-items: center; }
+  .tr.head > div:first-child { display: none; }
+  .tr.head .dwell { display: none; }
+}
+@media (max-width: 380px) {
+  .nightctl { flex: 1 1 100%; justify-content: space-between; margin-left: 0; }
+  .day { flex: 1 1 auto; min-width: 0; }
+  input[type=date] { width: 100%; max-width: none; min-width: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .brand .logo { animation: snooze 4s ease-in-out infinite; transform-origin: 50% 90%; }
+  @keyframes snooze { 50% { transform: rotate(-3deg) translateY(1px); } }
+  @keyframes blink { 50% { opacity: .35; } }
+  .win { animation: rise .16s ease-out; }
+  @keyframes rise { from { transform: translateY(8px); opacity: .6; } }
+}
+</style>
+
+<header class="top">
+  <div class="brand"><img class="logo" src="logo.svg" alt="" width="36" height="36"><h1>SleepyTrain</h1></div>
+  <div class="nightctl">
+    <button class="btn" id="prev" aria-label="Giorno precedente">◀</button>
+    <label class="day"><span class="lbl">Notte del</span><input type="date" id="pick" aria-label="Scegli il giorno"></label>
+    <button class="btn" id="next" aria-label="Giorno successivo">▶</button>
+    <button class="btn" id="infobtn" aria-label="Informazioni sull'app" title="Informazioni">ⓘ</button>
+  </div>
+</header>
+<div class="banner" id="banner"></div>
+
+<main class="main">
+  <div class="mapwrap" id="mapwrap">
+    <svg id="map" role="img" aria-label="Mappa dell'Italia con le stazioni di deposito notturno"></svg>
+    <div class="loading" id="loading">Caricamento orari…</div>
+    <div class="mapfilters">
+      <div class="qwrap">
+        <input id="q" placeholder="Cerca città o stazione…" autocomplete="off" autocorrect="off" spellcheck="false"
+          role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="sugg" aria-label="Cerca stazione">
+        <div class="sugg" id="sugg" role="listbox" hidden></div>
+      </div>
+      <select id="regfilter" aria-label="Scegli la regione"><option value="">Tutta Italia</option></select>
+      <select id="opfilter" aria-label="Filtra per azienda"><option value="">Tutte le aziende</option></select>
+    </div>
+    <div class="mapui">
+      <button class="btn" id="zin" aria-label="Ingrandisci">+</button>
+      <button class="btn" id="zout" aria-label="Riduci">−</button>
+      <button class="btn" id="zreset" aria-label="Vista intera" style="font-size:13px">⤢</button>
+    </div>
+    <div class="legend" aria-hidden="true">
+      <svg width="74" height="22"><circle cx="8" cy="11" r="3" fill="#8d9bb8"/><circle cx="26" cy="11" r="6" fill="#8d9bb8"/><circle cx="52" cy="11" r="10" fill="#8d9bb8"/></svg>
+      <span>treni in deposito</span>
+      <svg width="16" height="16"><path d="M8,8L8,2A6,6 0 0 1 13.2,11Z" fill="#14a0de"/><path d="M8,8L13.2,11A6,6 0 1 1 8,2Z" fill="#c8102e"/><circle cx="8" cy="8" r="6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>
+      <span>colori delle aziende</span>
+    </div>
+  </div>
+  <aside class="panel" id="panel"></aside>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="win" role="dialog" aria-modal="true" aria-labelledby="wtitle" id="win"></div>
+</div>
+
+<!-- shown instead of a blank screen when the app cannot start (old or missing web component) -->
+<div id="bootfail" hidden style="position:fixed;top:0;right:0;bottom:0;left:0;z-index:99;background:#0b1220;color:#e6ebf5;padding:28px 20px;font:15px/1.5 sans-serif;overflow:auto">
+  <h2 style="margin:0 0 10px;font-size:22px">SleepyTrain non riesce ad avviarsi</h2>
+  <p id="bootmsg" style="color:#8d9bb8;margin:0 0 14px"></p>
+  <p style="margin:0 0 14px">Aggiorna il telefono (Impostazioni → Generali → Aggiornamento software) o il browser, poi riapri SleepyTrain.</p><p style="margin:0"><a href="./" style="display:inline-block;background:#ffb547;color:#1a1203;padding:10px 14px;border-radius:8px;text-decoration:none;font-weight:bold">Riprova</a></p>
+</div>
+<script>
+/* ES5 on purpose: runs even where the main script cannot. Polyfills for older Android WebView + start-up watchdog. */
+(function () {
+  if (!Object.fromEntries) Object.fromEntries = function (it) { var o = {}; Array.prototype.forEach.call(Array.from(it), function (p) { o[p[0]] = p[1]; }); return o; };
+  if (!Array.prototype.flatMap) Array.prototype.flatMap = function (f, t) { return Array.prototype.concat.apply([], this.map(f, t)); };
+  if (!Object.values) Object.values = function (o) { return Object.keys(o).map(function (k) { return o[k]; }); };
+  if (!String.prototype.padStart) String.prototype.padStart = function (n, s) { var r = String(this); s = s === undefined ? " " : String(s); while (r.length < n) r = s + r; return r; };
+  if (!window.ResizeObserver) window.ResizeObserver = function (cb) { this.observe = function () { window.addEventListener("resize", function () { cb([]); }); }; this.disconnect = function () {}; };
+  if (window.NodeList && !NodeList.prototype.forEach) NodeList.prototype.forEach = Array.prototype.forEach;
+  if (!Element.prototype.closest) Element.prototype.closest = function (sel) { var e = this; while (e && e.nodeType === 1) { if ((e.matches || e.webkitMatchesSelector).call(e, sel)) return e; e = e.parentNode; } return null; };
+  if (!String.prototype.normalize) String.prototype.normalize = function () { return String(this); };
+
+  // Engines before 2020 (Chrome < 84) ignore "gap" in flex boxes: everything would stick together.
+  // There, copy each flex box's gap onto its children as margins, now and whenever the page changes.
+  try {
+    var t = document.createElement("div");
+    t.style.cssText = "display:flex;flex-direction:column;row-gap:1px;position:absolute;visibility:hidden";
+    t.appendChild(document.createElement("div")); t.appendChild(document.createElement("div"));
+    document.body.appendChild(t);
+    var flexGap = t.scrollHeight === 1;
+    document.body.removeChild(t);
+    if (!flexGap) {
+      var px = function (v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; };
+      var fixGaps = function () {
+        var all = document.body.getElementsByTagName("*");
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.namespaceURI !== "http://www.w3.org/1999/xhtml") continue; // map drawing: no flex there
+          var cs = getComputedStyle(el);
+          if (cs.display !== "flex" && cs.display !== "inline-flex") continue;
+          var cg = px(cs.columnGap), rg = px(cs.rowGap || cs.columnGap);
+          if (!cg && !rg) continue;
+          var col = cs.flexDirection.indexOf("column") === 0, wrap = cs.flexWrap !== "nowrap";
+          var kids = el.children;
+          for (var k = 0; k < kids.length; k++) {
+            var c = kids[k];
+            if (getComputedStyle(c).position === "absolute") continue;
+            if (col) { if (k) c.style.marginTop = rg + "px"; }
+            else { if (k) c.style.marginLeft = cg + "px"; if (wrap) c.style.marginBottom = rg + "px"; }
+          }
+        }
+      };
+      var pending = false;
+      var soon = function () { if (pending) return; pending = true; setTimeout(function () { pending = false; fixGaps(); }, 60); };
+      document.documentElement.className += " nofg";
+      if (window.MutationObserver) new MutationObserver(function (list) {
+        for (var i = 0; i < list.length; i++) { var n = list[i].target; if (n.namespaceURI === "http://www.w3.org/1999/xhtml") { soon(); return; } }
+      }).observe(document.body, { childList: true, subtree: true });
+      window.addEventListener("resize", soon);
+      soon();
+    }
+  } catch (e) { }
+  var shown = false;
+  window.__bootFail = function (msg) {
+    if (shown || window.__appStarted) return; shown = true;
+    var d = document.getElementById("bootfail"); if (!d) return;
+    document.getElementById("bootmsg").textContent = msg || "";
+    d.hidden = false; d.style.display = "block";
+  };
+  window.addEventListener("error", function (e) {
+    if (!window.__appStarted) window.__bootFail("Errore: " + (e && e.message ? e.message : "sconosciuto"));
+  });
+  setTimeout(function () { if (!window.__appStarted) window.__bootFail("L'avvio sta impiegando troppo tempo su questo telefono."); }, 20000);
+  // the map needs touch/pointer events and promises (web engines from 2017 onwards)
+  if (!window.PointerEvent || !window.Promise || !window.Map || !window.Set)
+    window.__bootFail("Il browser di questo telefono è troppo vecchio per mostrare la mappa.");
+})();
+</script>
+
+<script src="data.js"></script>
+<script>
+(() => {
+  const TZ = "Europe/Rome";
+  const DAY0 = 180; // la giornata di servizio parte alle 03:00
+  const OPS = {
+    "Trenitalia": { s: "Trenitalia", c: "#c8102e" },
+    "Trenitalia Tper": { s: "Tper", c: "#0072bc" },
+    "Trenord": { s: "Trenord", c: "#2f9e44" },
+    "TUA": { s: "TUA", c: "#7048c8" },
+    "SAD": { s: "SAD", c: "#f28c00", fg: "#1a1203" },
+    "TFT": { s: "TFT", c: "#8a6d3b" },
+    "Trentino Trasporti": { s: "Trentino Trasp.", c: "#b5179e" },
+    "EAV": { s: "EAV", c: "#14a0de", fg: "#03131c" },
+    "ARST": { s: "ARST", c: "#2b55a8" },
+    "FSE": { s: "Ferrovie Sud Est", c: "#d4a017", fg: "#1b1402" },
+    "Ferrovie del Gargano": { s: "Ferr. del Gargano", c: "#8cc63f", fg: "#121a05" },
+    "Ferrotramviaria": { s: "Ferrotramviaria", c: "#e85d75" },
+    "FAL": { s: "FAL", c: "#9b1b30" },
+    "Circumetnea": { s: "Circumetnea", c: "#0e7c86" },
+    "Ferrovie della Calabria": { s: "Ferr. della Calabria", c: "#5b7a1e" },
+    "SSIF Vigezzina": { s: "Vigezzina", c: "#6b4f9e" },
+    "FCU": { s: "FCU Umbria", c: "#3c8d6e" },
+  };
+  const opInfo = (op) => OPS[op] || { s: op, c: "#556" };
+  const badge = (op, sm) => { const o = opInfo(op); return `<span class="badge${sm ? " sm" : ""}" style="--op:${o.c};--op-fg:${o.fg || "#fff"}" title="${esc(op)}">${esc(o.s)}</span>`; };
+
+  let DATA = null, night = null, selected = null, opFilter = "", winFilter = "", region = "";
+  const inScope = (st) => !region || st.r === region;
+  const hasOp = (st, op) => Object.values(st.k).some(n => n[op]);
+
+  // logos (Wikimedia Commons) and typical rolling stock per operator / line
+  const LOGOS = { "Trenitalia": "trenitalia", "Trenitalia Tper": "trenitalia-tper", "TUA": "tua", "SAD": "sad", "TFT": "tft",
+    "Trentino Trasporti": "trentino-trasporti", "EAV": "eav", "ARST": "arst", "FSE": "fse", "Ferrovie del Gargano": "ferrovie-del-gargano",
+    "FAL": "fal", "Circumetnea": "circumetnea", "Ferrovie della Calabria": "ferrovie-della-calabria" };
+  const MODELS = {
+    "pop": "Pop (ETR 104)", "rock": "Rock (ETR 521)", "jazz": "Jazz (ETR 425)", "rock-tper": "Rock (ETR 421)",
+    "caravaggio": "Caravaggio (ETR 421/521)", "sfsm-etr": "Elettrotreno Circumvesuviana", "et400": "Elettrotreno ET 400",
+    "eti400": "Elettrotreno ETi 400", "arst-ade": "Automotrice ADe", "fse-atr220": "Swing (ATR 220)", "fg-etr330": "ETR 330 (Stadler FLIRT)",
+    "ft-etr340": "ETR 340 (Stadler FLIRT)", "fal-stadler": "Stadler serie ST", "fce-ade": "Automotrice ADe 21–25", "fc-m4c": "Stadler M4C",
+    "ssif-abe": "ABe 4/6 Vigezzina", "sad-etr170": "ETR 170 (Stadler FLIRT)", "tft-etr425": "Jazz (ETR 425)", "tua-minuetto": "Minuetto (ALe 501)",
+    "fcu-minuetto": "Minuetto (ALe 501)", "swing": "Swing (ATR 220) diesel", "minuetto-d": "Minuetto diesel (ALn 501)",
+    "blues": "Blues (HTR 412) ibrido", "tper-atr220": "ATR 220 diesel" };
+  // "~D" = the train starts or ends where the line has no overhead wires (OpenStreetMap): diesel stock
+  const SOUTH_SWING = new Set(["Puglia", "Basilicata", "Molise", "Calabria", "Campania"]);
+  function modelOf(op, info, region) {
+    const i = (info || "").toLowerCase();
+    const diesel = i.includes("~d");
+    switch (op) {
+      case "Trenitalia":
+        if (diesel) return SOUTH_SWING.has(region) ? "swing" : region === "Sicilia" ? "blues" : "minuetto-d";
+        return i.includes("veloce") ? "rock" : (i.includes("suburbano") || i.includes("metropolitano")) ? "jazz" : "pop";
+      case "Trenitalia Tper": return diesel ? "tper-atr220" : "rock-tper";
+      case "Trenord": return "caravaggio";
+      case "EAV": return /torregaveta|pozzuoli|montesanto|soccavo|bagnoli|monte sant/.test(i) ? "et400" : "sfsm-etr";
+      case "Trentino Trasporti": return "eti400";
+      case "ARST": return "arst-ade";
+      case "FSE": return "fse-atr220";
+      case "Ferrovie del Gargano": return "fg-etr330";
+      case "Ferrotramviaria": return "ft-etr340";
+      case "FAL": return "fal-stadler";
+      case "Circumetnea": return "fce-ade";
+      case "Ferrovie della Calabria": return "fc-m4c";
+      case "SSIF Vigezzina": return "ssif-abe";
+      case "SAD": return "sad-etr170";
+      case "TFT": return "tft-etr425";
+      case "TUA": return "tua-minuetto";
+      case "FCU": return "fcu-minuetto";
+    }
+    return null;
+  }
+  // material named in the operator's own data (Puglia programmes): "ATR220", "ETR 330", "elettrotreno…"
+  const declaredMaterial = (info) => { const m = (info || "").replace("~D", "").split(" · ")[1]; return m && m.trim().length > 1 ? m.trim() : ""; };
+  const infoText = (info) => (info || "").replace("~D", "").split(" · ")[0];
+  const opLogo = (op, h) => LOGOS[op] ? `<img class="oplogo" src="img/logos/${LOGOS[op]}.png" alt="${esc(op)}" style="height:${h}px">` : badge(op);
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // ---------- tempo (ora italiana) ----------
+  function romeNow() {
+    try {
+      const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+        .formatToParts(new Date()).map(x => [x.type, x.value]));
+      return { date: `${p.year}-${p.month}-${p.day}`, h: +p.hour % 24, m: +p.minute, s: +p.second };
+    } catch (e) { // very old WebView without time zones: use the phone's own clock
+      const d = new Date(), z = (n) => String(n).padStart(2, "0");
+      return { date: `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`, h: d.getHours(), m: d.getMinutes(), s: d.getSeconds() };
+    }
+  }
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const addDays = (s, n) => { const d = new Date(s + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+  const fmtDay = (s, opt) => new Date(s + "T12:00:00Z").toLocaleDateString("it-IT", Object.assign({ timeZone: "UTC" }, opt));
+  const toMin = (s) => +s.slice(0, 2) * 60 + +s.slice(3, 5);
+  const dur = (m) => `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}`;
+  const evOrder = (t) => (toMin(t) - DAY0 + 1440) % 1440;
+
+  // the app shows one night: the one starting on the evening of the chosen day (default: today)
+  function currentNight() { return romeNow().date; }
+  function effective(d) {
+    const [a, b] = DATA.period;
+    if (d >= a && d <= b) return { d, mapped: false };
+    const wd = new Date(d + "T12:00:00Z").getUTCDay();
+    let x = d > b ? b : a;
+    while (new Date(x + "T12:00:00Z").getUTCDay() !== wd) x = d > b ? addDays(x, -1) : addDays(x, 1);
+    if (x === "2026-12-08") x = d > b ? addDays(x, -7) : addDays(x, 7);
+    return { d: x, mapped: true };
+  }
+
+  // ---------- dati ----------
+  // st.k[date] = { operator: [pairs, arrOnly, depOnly] }
+  function nightOf(st, d, only) {
+    const n = st.k[d] || {};
+    const byOp = [];
+    let count = 0;
+    for (const op in n) {
+      if (only && op !== only) continue;
+      const [pairs, arr, dep] = n[op];
+      const c = Math.max(pairs.length + arr.length, pairs.length + dep.length);
+      if (!c) continue;
+      byOp.push({ op, pairs, arr, dep, count: c });
+      count += c;
+    }
+    byOp.sort((a, b) => b.count - a.count);
+    return { byOp, count };
+  }
+
+  // ---------- mappa ----------
+  const svg = $("map");
+  const NS = "http://www.w3.org/2000/svg";
+  let vb = null, full = null, gSt = null, gLab = null, gReg = null, gRegLab = null, dragged = false, shownStations = [];
+
+  // A tap on the map opens the closest town within reach of a finger (about 40 px),
+  // so a slightly-off tap never falls through to the region underneath.
+  const TAP_PX = 40;
+  function nearbyStations(clientX, clientY) {
+    const r = svg.getBoundingClientRect();
+    return shownStations.map(st => {
+      const sx = r.left + (st.x - vb.x) / vb.w * r.width, sy = r.top + (st.y - vb.y) / vb.h * r.height;
+      return { st, d: Math.hypot(sx - clientX, sy - clientY) };
+    }).filter(x => x.d <= TAP_PX).sort((a, b) => a.d - b.d).map(x => x.st);
+  }
+  function mapTap(e, regionName) {
+    if (dragged) return;
+    closePicker();
+    const near = nearbyStations(e.clientX, e.clientY);
+    if (near.length === 1) { openStation(near[0]); return; }
+    if (near.length > 1) { showPicker(near.slice(0, 6), e.clientX, e.clientY); return; }
+    // inside the region already shown: keep the current zoom, do nothing
+    if (regionName && regionName !== region) setRegion(regionName);
+  }
+  // several towns under the finger: let the user pick one from a short list
+  function showPicker(list, cx, cy) {
+    const wrap = $("mapwrap").getBoundingClientRect();
+    const ed = effective(night).d;
+    const p = document.createElement("div");
+    p.className = "picker"; p.id = "picker";
+    p.innerHTML = `<div class="picker-h">Quale stazione?</div>` + list.map((st, i) =>
+      `<button data-i="${DATA.st.indexOf(st)}"><span>${esc(st.n)}</span><span class="c">${nightOf(st, ed, opFilter).count}</span></button>`).join("");
+    $("mapwrap").appendChild(p);
+    const w = p.offsetWidth, h = p.offsetHeight;
+    p.style.left = Math.max(8, Math.min(cx - wrap.left - w / 2, wrap.width - w - 8)) + "px";
+    p.style.top = Math.max(8, Math.min(cy - wrap.top + 14, wrap.height - h - 8)) + "px";
+    p.querySelectorAll("button").forEach(b => b.onclick = (ev) => { ev.stopPropagation(); closePicker(); openStation(DATA.st[+b.dataset.i]); });
+    p.addEventListener("pointerdown", ev => ev.stopPropagation());
+  }
+  function closePicker() { const p = $("picker"); if (p) p.remove(); }
+  function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function buildMap() {
+    const g = DATA.geo;
+    full = { x: 0, y: 0, w: g.w, h: g.h };
+    svg.innerHTML = "";
+    const defs = el("defs", {}, svg);
+    const cp = el("clipPath", { id: "frame" }, defs);
+    el("rect", { x: -20, y: -20, width: g.w + 40, height: g.h + 40 }, cp);
+    const base = el("g", { "clip-path": "url(#frame)" }, svg);
+    el("path", { d: g.others, class: "others" }, base);
+    el("path", { d: g.italy, class: "land" }, base);
+    gReg = el("g", {}, svg);
+    for (const r of DATA.regions) {
+      const p = el("path", { d: r.d, class: "reg" }, gReg);
+      p.dataset.r = r.n;
+      el("title", {}, p).textContent = r.n;
+      p.addEventListener("click", (e) => { e.stopPropagation(); mapTap(e, r.n); });
+    }
+    gRegLab = el("g", {}, svg);
+    gSt = el("g", {}, svg);
+    gLab = el("g", {}, svg);
+    fitView();
+  }
+  function fitView() {
+    const r = svg.getBoundingClientRect();
+    const ar = r.width > 0 && r.height > 0 ? r.width / r.height : full.w / full.h;
+    let w = full.w, h = full.h;
+    if (w / h < ar) w = h * ar; else h = w / ar;
+    vb = { x: full.x - (w - full.w) / 2, y: full.y - (h - full.h) / 2, w, h };
+    applyVB();
+  }
+  function applyVB() { svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`); drawStations(); }
+  // the map can briefly have no size (start-up, app in background): never divide by zero
+  const pxPerUnit = () => (svg.getBoundingClientRect().width || 360) / vb.w;
+  const aspect = (r) => r.width > 0 && r.height > 0 ? r.width / r.height : 0.6;
+
+  function drawStations() {
+    if (!gSt || !night) return;
+    const ppu = pxPerUnit();
+    if (!isFinite(ppu) || ppu <= 0) return; // map not laid out yet (hidden or zero size)
+    const ed = effective(night).d;
+    gSt.innerHTML = ""; gLab.innerHTML = ""; gRegLab.innerHTML = "";
+    const zoom = full.w / vb.w;
+    const spanKm = vb.w * 1.11; // map units are ~1.1 km wide
+    gReg.querySelectorAll(".reg").forEach(p => {
+      const off = !regionAllowed(p.dataset.r);
+      p.classList.toggle("on", p.dataset.r === region);
+      p.classList.toggle("dim", (!!region && p.dataset.r !== region) || off);
+      p.classList.toggle("off", off);
+    });
+
+    // labels are placed greedily by priority; a label that would overlap one already placed is skipped
+    const placed = [];
+    const r = svg.getBoundingClientRect();
+    const fits = (x, y, w, h) => {
+      const sx = (x - vb.x) * ppu, sy = (y - vb.y) * ppu;
+      if (sx + w < 0 || sy < -h || sx > r.width || sy - h > r.height) return false;
+      for (const b of placed) if (sx < b[0] + b[2] && sx + w > b[0] && sy - h < b[1] && sy > b[1] - b[3]) return false;
+      placed.push([sx, sy, w, h]); return true;
+    };
+
+    // which stations: Italy view = big cities (medium ones appear when zooming in);
+    // region view = every town of the region, plus the big cities elsewhere, faded and not clickable
+    const items = [];
+    for (const st of DATA.st) {
+      const n = nightOf(st, ed, opFilter);
+      if (n.count === 0 && st !== selected) continue;
+      const mine = !region || st.r === region;
+      // an operator filter shows every station of that operator, towns included
+      const visible = opFilter || region || st.t === 1 || (st.t === 2 && spanKm < 650) || (st.t === 3 && spanKm < 260) || st === selected;
+      if (mine && visible) items.push({ st, n, faded: false });
+      else if (!mine && st.t === 1) items.push({ st, n, faded: true });
+    }
+    items.sort((a, b) => (b.faded - a.faded) || (a.n.count - b.n.count));
+    shownStations = items.filter(x => !x.faded).map(x => x.st);
+
+    const labels = [];
+    for (const { st, n, faded } of items) {
+      const c = n.count;
+      const base = Math.max(st.t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(Math.max(c, 1)) * 1.5, 14));
+      const rad = base * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
+      if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
+      const cls = "st" + (st === selected ? " sel" : "") + (n.byOp.length > 1 ? " multi" : "") + (faded ? " faded" : "");
+      // dot coloured by operator; several operators -> pie slices sized by their trains
+      const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: cls }, gSt);
+      if (!faded) {
+        if (n.byOp.length === 1) dot.style.fill = opInfo(n.byOp[0].op).c;
+        else if (n.byOp.length > 1) {
+          dot.style.fill = "transparent";
+          let a0 = -Math.PI / 2;
+          const g = el("g", { class: "pie" }, gSt);
+          for (const o of n.byOp) {
+            const a1 = a0 + 2 * Math.PI * o.count / c;
+            const large = a1 - a0 > Math.PI ? 1 : 0;
+            const p = `M${st.x},${st.y}L${st.x + rad * Math.cos(a0)},${st.y + rad * Math.sin(a0)}A${rad},${rad} 0 ${large} 1 ${st.x + rad * Math.cos(a1)},${st.y + rad * Math.sin(a1)}Z`;
+            el("path", { d: p, fill: opInfo(o.op).c }, g);
+            a0 = a1;
+          }
+          gSt.appendChild(dot); // keep the circle (outline + click target) above the slices
+        }
+        if (st === selected) dot.style.fill = n.byOp.length > 1 ? "transparent" : "#fff";
+      }
+      if (!faded) {
+        dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
+        el("title", {}, dot).textContent = `${st.n}: ${c} treni in deposito` + (n.byOp.length ? " (" + n.byOp.map(o => opInfo(o.op).s + " " + o.count).join(", ") + ")" : "");
+      }
+      // label rules: big cities always; medium from a regional zoom; towns only when zoomed in
+      const show = st === selected || st.t === 1 || (st.t === 2 && (region || spanKm < 650)) || (st.t === 3 && (region || spanKm < 200));
+      if (show) labels.push({ st, rad, faded, pr: st === selected ? 0 : faded ? 4 : st.t, c });
+    }
+    labels.sort((a, b) => a.pr - b.pr || b.c - a.c);
+    for (const L of labels) {
+      const fs = L.st.t === 1 ? 13 : L.st.t === 2 ? 11.5 : 10.5;
+      const w = L.st.n.length * fs * 0.55 + 4;
+      const x = L.st.x + L.rad + 3 / ppu, y = L.st.y + fs * 0.35 / ppu;
+      if (L.st !== selected && !fits(x, y, w, fs)) continue;
+      const t = el("text", { x, y, class: "lab t" + L.st.t + (L.faded ? " faded" : ""), "font-size": fs / ppu }, gLab);
+      t.style.strokeWidth = (3 / ppu) + "px";
+      t.textContent = L.st.n;
+    }
+
+    // region names (always, except the one being shown); city names win any overlap
+    for (const rg of DATA.regions) {
+      if (rg.n === region) continue;
+      const name = rg.n.length > 14 ? rg.n.split(/[\s-]/)[0] : rg.n;
+      const fs = region ? 11 : 9.5;
+      const w = name.length * fs * 0.62 + 4;
+      if (!fits(rg.c[0] - w / 2 / ppu, rg.c[1] + fs / 2 / ppu, w, fs)) continue;
+      const t = el("text", { x: rg.c[0], y: rg.c[1], class: "reglab", "text-anchor": "middle", "font-size": fs / ppu }, gRegLab);
+      t.style.strokeWidth = (2.5 / ppu) + "px";
+      t.textContent = name;
+    }
+  }
+
+  function zoomAt(f, cx, cy) {
+    const nw = Math.min(Math.max(vb.w / f, full.w / 60), full.w * 1.6);
+    const k = nw / vb.w;
+    vb = { x: cx - (cx - vb.x) * k, y: cy - (cy - vb.y) * k, w: nw, h: vb.h * k };
+    applyVB();
+  }
+  function toUser(clientX, clientY) {
+    const r = svg.getBoundingClientRect();
+    return { x: vb.x + (clientX - r.left) / r.width * vb.w, y: vb.y + (clientY - r.top) / r.height * vb.h };
+  }
+  svg.addEventListener("wheel", (e) => { e.preventDefault(); const p = toUser(e.clientX, e.clientY); zoomAt(e.deltaY < 0 ? 1.25 : 0.8, p.x, p.y); }, { passive: false });
+  const ptrs = new Map(); let lastPinch = null;
+  svg.addEventListener("pointerdown", (e) => { closePicker(); if (e.target.classList.contains("st")) return; dragged = false; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }); });
+  svg.addEventListener("pointermove", (e) => {
+    if (!ptrs.has(e.pointerId)) return;
+    const prev = ptrs.get(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: prev.x0, y0: prev.y0 });
+    if (ptrs.size === 1) {
+      const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+      if (!dragged && Math.abs(e.clientX - prev.x0) + Math.abs(e.clientY - prev.y0) > 4) { dragged = true; svg.classList.add("drag"); try { svg.setPointerCapture(e.pointerId); } catch (_) {} }
+      if (!dragged) return;
+      const ppu = pxPerUnit();
+      vb.x -= dx / ppu; vb.y -= dy / ppu; applyVB();
+    } else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (lastPinch) { const c = toUser((a.x + b.x) / 2, (a.y + b.y) / 2); zoomAt(d / lastPinch, c.x, c.y); }
+      lastPinch = d; dragged = true;
+    }
+  });
+  const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) lastPinch = null; svg.classList.remove("drag"); };
+  svg.addEventListener("pointerup", up); svg.addEventListener("pointercancel", up);
+  $("zin").onclick = () => zoomAt(1.5, vb.x + vb.w / 2, vb.y + vb.h / 2);
+  $("zout").onclick = () => zoomAt(1 / 1.5, vb.x + vb.w / 2, vb.y + vb.h / 2);
+  $("zreset").onclick = fitView;
+  // on resize keep the user's current zoom and centre, only adapt to the new shape
+  let lastSize = null;
+  new ResizeObserver(() => {
+    if (!DATA || !full || !vb) return;
+    const r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    if (lastSize && Math.abs(lastSize[0] - r.width) < 2 && Math.abs(lastSize[1] - r.height) < 2) return;
+    lastSize = [r.width, r.height];
+    const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2, h = vb.w * r.height / r.width;
+    vb = { x: vb.x, y: cy - h / 2, w: vb.w, h };
+    vb.x = cx - vb.w / 2;
+    applyVB();
+  }).observe($("mapwrap"));
+  svg.addEventListener("click", (e) => { if (!e.target.classList.contains("st")) mapTap(e, null); });
+
+  // ---------- pannello nazionale ----------
+  const nightText = (fmt) => `${fmtDay(night, fmt)} → ${fmtDay(addDays(night, 1), fmt)}`;
+  function renderPanel() {
+    if (!DATA) return;
+    const ed = effective(night).d;
+    const ranked = DATA.st.filter(inScope).map(st => ({ st, n: nightOf(st, ed, opFilter) })).filter(x => x.n.count > 0).sort((a, b) => b.n.count - a.n.count);
+    const tot = ranked.reduce((s, x) => s + x.n.count, 0);
+    const perOp = {};
+    for (const x of ranked) for (const o of x.n.byOp) perOp[o.op] = (perOp[o.op] || 0) + o.count;
+    const ops = Object.entries(perOp).sort((a, b) => b[1] - a[1]);
+    const max = ops.length ? ops[0][1] : 1;
+    let regionBars = "";
+    if (!region) {
+      const perReg = {};
+      for (const st of DATA.st) { if (st.r === "Estero") continue; const c = nightOf(st, ed, opFilter).count; if (c) perReg[st.r] = (perReg[st.r] || 0) + c; }
+      const rs = Object.entries(perReg).sort((a, b) => b[1] - a[1]);
+      const rmax = rs.length ? rs[0][1] : 1;
+      regionBars = `<div><h3>Per regione</h3><div class="regbars">${rs.map(([r, c]) => `<button data-r="${esc(r)}" title="Mostra ${esc(r)}"><span class="rn">${esc(r)}</span><span class="bar" style="width:${Math.max(2, c / rmax * 100)}%"></span><span class="c">${c}</span></button>`).join("")}</div></div>`;
+    }
+    const occ = occupancy(ranked.map(x => x.st), ed);
+    const totProb = ranked.reduce((s, x) => s + x.n.byOp.reduce((a, o) => a + o.dep.length, 0), 0);
+    $("panel").innerHTML = `
+      <div><div class="eyebrow">Notte ${esc(nightText({ weekday: "short", day: "numeric", month: "short" }))}</div>
+        <h2 class="stname">${opFilter ? badge(opFilter) + " " : ""}${esc(region || "Tutta Italia")}</h2>
+        ${region ? `<button class="btn" id="allit" style="margin-top:8px">← Tutta Italia</button>` : ""}</div>
+      <div class="kpis">
+        <div class="kpi"><div class="v">${tot}</div><div class="k">treni in deposito${totProb ? ` · ${totProb} probabili` : ""}</div></div>
+        <div class="kpi"><div class="v">${ranked.length}</div><div class="k">città e paesi</div></div>
+        <div class="kpi"><div class="v">${ops.length}</div><div class="k">aziende</div></div>
+      </div>
+      <div><h3>Treni fermi durante la notte</h3><div class="chart" id="occ"></div></div>
+      ${regionBars}
+      <div><h3>Per azienda</h3><div class="oplist">${ops.length ? ops.map(([op, c]) => `
+        <div class="oprow">${badge(op, true)}<div class="bar"><i style="width:${Math.max(2, c / max * 100)}%;background:${opInfo(op).c}"></i></div><span class="c">${c}</span></div>`).join("") : `<div class="empty">Nessun treno in deposito.</div>`}</div></div>
+      <div><h3>${region ? "Città e paesi" : "Dove dormono più treni"}</h3>
+        <div class="list">${ranked.slice(0, region ? 200 : 30).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
+          <span class="dots">${x.n.byOp.map(o => `<i style="background:${opInfo(o.op).c}" title="${esc(o.op)}"></i>`).join("")}</span><span class="c">${x.n.count}</span></button>`).join("")}</div>
+      </div>
+      ${methodNote()}`;
+    drawOccupancy($("occ"), occ);
+    $("panel").querySelectorAll(".list button").forEach(b => b.onclick = () => openStation(DATA.st[+b.dataset.i]));
+    $("panel").querySelectorAll(".regbars button").forEach(b => b.onclick = () => setRegion(b.dataset.r));
+    if ($("allit")) $("allit").onclick = () => setRegion("");
+  }
+
+  // ---------- grafico: treni fermi nel corso della notte ----------
+  const T0 = 16 * 60, T1 = 34 * 60, STEP = 10; // dalle 16:00 alle 10:00 del giorno dopo
+  function occupancy(stations, ed) {
+    const n = Math.round((T1 - T0) / STEP) + 1;
+    const diff = new Array(n + 1).fill(0);
+    const add = (a, b) => { const i = Math.max(0, Math.ceil((a - T0) / STEP)), j = Math.min(n, Math.ceil((b - T0) / STEP)); if (j > i) { diff[i]++; diff[j]--; } };
+    const ev = (t) => { let m = toMin(t); return m < DAY0 ? m + 1440 : m; };
+    for (const st of stations) {
+      for (const o of nightOf(st, ed, opFilter).byOp) {
+        for (const p of o.pairs) { const a = ev(p[1]); add(a, a + p[6]); }
+        for (const a of o.arr) add(ev(a[1]), T1 + STEP);
+        for (const d of o.dep) add(T0, toMin(d[1]) + 1440);
+      }
+    }
+    const pts = []; let c = 0;
+    for (let i = 0; i < n; i++) { c += diff[i]; pts.push(c); }
+    return pts;
+  }
+  function drawOccupancy(box, pts) {
+    const W = 360, H = 150, L = 34, R = 8, Tp = 10, B = 22;
+    const max = Math.max(1, ...pts);
+    const nice = (v) => { const p = Math.pow(10, Math.floor(Math.log10(v))); return Math.ceil(v / p) * p; };
+    const ymax = nice(max);
+    const x = (i) => L + i / (pts.length - 1) * (W - L - R);
+    const y = (v) => Tp + (1 - v / ymax) * (H - Tp - B);
+    const line = pts.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    const area = `${line}L${x(pts.length - 1)},${y(0)}L${x(0)},${y(0)}Z`;
+    const ticks = [18, 21, 24, 27, 30, 33].map(h => { const i = (h * 60 - T0) / STEP; return `<line class="grid" x1="${x(i)}" x2="${x(i)}" y1="${Tp}" y2="${H - B}" opacity=".35"/><text class="ax" x="${x(i)}" y="${H - 6}" text-anchor="middle">${String(h % 24).padStart(2, "0")}:00</text>`; }).join("");
+    const yt = [0, ymax / 2, ymax].map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="ax" x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${Math.round(v)}</text>`).join("");
+    const peakI = pts.indexOf(max);
+    const nowLine = "";
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Treni in deposito nel corso della notte, massimo ${max}">
+      ${yt}${ticks}<path class="area" d="${area}"/><path class="ln" d="${line}"/>${nowLine}
+      <text class="ax" x="${x(peakI)}" y="${y(max) - 4}" text-anchor="middle" style="fill:var(--fg)">${max}</text>
+      <line class="cross" id="cx" y1="${Tp}" y2="${H - B}" visibility="hidden"/><circle class="dot" id="cd" r="4" visibility="hidden"/>
+      <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent" id="hit"/></svg><div class="tip" id="ctip" hidden></div>`;
+    const s = box.querySelector("svg"), hit = box.querySelector("#hit"), cx = box.querySelector("#cx"), cd = box.querySelector("#cd"), tip = box.querySelector("#ctip");
+    const show = (e) => {
+      const r = s.getBoundingClientRect();
+      const ux = (e.clientX - r.left) / r.width * W;
+      const i = Math.max(0, Math.min(pts.length - 1, Math.round((ux - L) / (W - L - R) * (pts.length - 1))));
+      cx.setAttribute("x1", x(i)); cx.setAttribute("x2", x(i)); cx.setAttribute("visibility", "visible");
+      cd.setAttribute("cx", x(i)); cd.setAttribute("cy", y(pts[i])); cd.setAttribute("visibility", "visible");
+      const m = (T0 + i * STEP) % 1440;
+      tip.innerHTML = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")} · <b>${pts[i]}</b> treni fermi`;
+      tip.style.left = (x(i) / W * r.width) + "px"; tip.style.top = (y(pts[i]) / H * r.height) + "px"; tip.hidden = false;
+    };
+    hit.addEventListener("pointermove", show); hit.addEventListener("pointerdown", show);
+    hit.addEventListener("pointerleave", () => { cx.setAttribute("visibility", "hidden"); cd.setAttribute("visibility", "hidden"); tip.hidden = true; });
+  }
+
+  // ---------- regione ----------
+  // with an operator chosen, only the regions where it has trains can be selected
+  function opRegions(op) {
+    const out = new Set();
+    for (const st of DATA.st) if (hasOp(st, op)) out.add(st.r);
+    return out;
+  }
+  let allowedRegions = null; // null = every region
+  function regionAllowed(r) { return !r || !allowedRegions || allowedRegions.has(r); }
+  function updateRegionMenu() {
+    allowedRegions = opFilter ? opRegions(opFilter) : null;
+    $("regfilter").querySelectorAll("option").forEach(o => {
+      const ok = regionAllowed(o.value);
+      o.disabled = !ok;
+      o.textContent = o.value ? o.value + (ok ? "" : " — nessun treno " + opFilter) : "Tutta Italia";
+    });
+  }
+  function setRegion(r) {
+    if (!regionAllowed(r)) { $("regfilter").value = region; return; }
+    region = r;
+    $("regfilter").value = r;    if (r) {
+      const g = DATA.regions.find(x => x.n === r);
+      const [x0, y0, x1, y1] = g.bb, pad = 12;
+      const ar = aspect(svg.getBoundingClientRect());
+      let w = x1 - x0 + pad * 2, h = y1 - y0 + pad * 2;
+      if (w / h < ar) w = h * ar; else h = w / ar;
+      vb = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h };
+      applyVB();
+    } else fitView();
+    renderPanel();
+  }
+
+  // ---------- finestra della stazione ----------
+  function statusOf(arrT, dwell) {
+    if (effective(night).mapped) return null;
+    let a = toMin(arrT); if (a < DAY0) a += 1440;
+    const aAbs = Date.parse(night + "T00:00:00Z") / 60000 + a;
+    const n = romeNow(); const nowAbs = Date.parse(n.date + "T00:00:00Z") / 60000 + n.h * 60 + n.m;
+    if (nowAbs < aAbs) return ["wait", "in arrivo"];
+    if (nowAbs < aAbs + dwell) return ["in", "in deposito ora"];
+    return ["gone", "ripartito"];
+  }
+  const numTag = (n) => n && n !== "—" ? `<span class="num">${esc(n)}</span>` : "";
+  const infoLine = (s) => s ? `<div class="info">${esc(s)}</div>` : "";
+
+  function openStation(st) {
+    selected = st; winFilter = opFilter || "";
+    drawStations();
+    renderWindow();
+    $("modal").hidden = false;
+    document.body.classList.add("modal-open");
+    $("win").querySelector(".close").focus();
+  }
+  function closeWindow() {
+    $("modal").hidden = true;
+    document.body.classList.remove("modal-open");
+    selected = null; drawStations();
+  }
+  $("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeWindow(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("modal").hidden) closeWindow(); });
+
+  function renderWindow() {
+    const st = selected; if (!st) return;
+    const ed = effective(night).d;
+    const all = nightOf(st, ed);
+    const shown = winFilter ? all.byOp.filter(o => o.op === winFilter) : all.byOp;
+    const pairsAll = shown.flatMap(o => o.pairs);
+    const deps = [...pairsAll.map(p => p[4]), ...shown.flatMap(o => o.dep.map(d => d[1]))].sort((a, b) => evOrder(a) - evOrder(b));
+    const avg = pairsAll.length ? Math.round(pairsAll.reduce((s, p) => s + p[6], 0) / pairsAll.length) : null;
+    const longest = pairsAll.length ? Math.max(...pairsAll.map(p => p[6])) : null;
+    const count = shown.reduce((s, o) => s + o.count, 0);
+    const probN = shown.reduce((s, o) => s + o.dep.length, 0);
+
+    // photo + model name of the train sleeping here ("indicato" when the operator's data names it, else "tipico")
+    // the same unit arrives and leaves: diesel if either run uses a non-electrified line
+    const modelCell = (op, infoA, infoB) => {
+      const both = (infoA || "") + " " + (infoB || "");
+      const slug = modelOf(op, both, st.r);
+      const declared = declaredMaterial(infoA) || declaredMaterial(infoB);
+      if (!slug) return `<div class="model"></div>`;
+      const diesel = both.includes("~D");
+      return `<div class="model"><img src="img/models/${slug}.jpg" alt="${esc(MODELS[slug])}" loading="lazy" data-slug="${slug}">
+        <div class="mname">${esc(declared || MODELS[slug])}</div><div class="mkind">${declared ? "materiale indicato" : "materiale tipico"}${diesel && !declared ? " · linea non elettrificata" : ""}</div></div>`;
+    };
+    const sections = shown.map(o => {
+      const rows = o.pairs.map(p => `<div class="tr">
+          ${modelCell(o.op, p[7], p[8])}
+          <div><div class="t">${p[1]}</div><div class="sub">${numTag(p[0])}da ${esc(p[2])}</div>${infoLine(infoText(p[7]))}</div>
+          <div class="arrow">→</div>
+          <div><div class="t">${p[4]}</div><div class="sub">${numTag(p[3])}per ${esc(p[5])}</div>${infoLine(infoText(p[8]))}</div>
+          <div class="dwell"><div class="d">${dur(p[6])}</div><div class="info">sosta</div></div></div>`).join("");
+      const arr = "";
+      // probable: early first departure with no arrival before it in the public timetables
+      const dep = o.dep.map(d => `<div class="tr prob">${modelCell(o.op, d[3], "")}
+          <div><span class="chip probchip">probabile</span><div class="lonely">arrivo serale non presente negli orari pubblici (forse a vuoto da un deposito vicino)</div></div>
+          <div class="arrow">→</div>
+          <div><div class="t">${d[1]}</div><div class="sub">${numTag(d[0])}per ${esc(d[2])}</div>${infoLine(infoText(d[3]))}</div>
+          <div class="dwell"><div class="info">sosta non nota</div></div></div>`).join("");
+      const oavg = o.pairs.length ? dur(Math.round(o.pairs.reduce((s, p) => s + p[6], 0) / o.pairs.length)) : "—";
+      return `<section class="opsec">
+        <div class="opsec-h">${opLogo(o.op, 30)}<strong>${o.count} ${o.count === 1 ? "treno" : "treni"}</strong><span class="meta">${esc(o.op)}${o.dep.length ? ` · ${o.pairs.length} certi, ${o.dep.length} probabili` : ""} · sosta media ${oavg}</span></div>
+        <div class="tbl">
+          <div class="tr head"><div>Treno</div><div>Arriva la sera</div><div></div><div>Riparte il mattino</div><div class="dwell">Sosta</div></div>
+          ${rows}${arr}${dep}
+        </div></section>`;
+    }).join("");
+
+    $("win").innerHTML = `
+      <div class="win-head">
+        <button class="depbtn" id="depbtn"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 4l5-2 6 2 5-2v14l-5 2-6-2-5 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 2v14M13 4v14" stroke="currentColor" stroke-width="1.5"/></svg>Guarda deposito</button>
+        <div class="oplogos">${all.byOp.map(o => opLogo(o.op, 26)).join("")}</div>
+        <div class="win-title">
+          <div><div class="eyebrow">Notte ${esc(nightText({ weekday: "long", day: "numeric", month: "long" }))}</div>
+            <h2 class="stname" id="wtitle">${esc(st.n)}</h2>
+            ${st.aka && st.aka.length ? `<div class="aka">anche: ${st.aka.map(esc).join(", ")}</div>` : ""}</div>
+          <button class="close" aria-label="Chiudi">×</button>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito${probN ? ` · ${probN} probabili` : ""}</div></div>
+          <div class="kpi"><div class="v">${deps[0] || "—"}</div><div class="k">prima partenza</div></div>
+          <div class="kpi"><div class="v">${avg != null ? dur(avg) : "—"}</div><div class="k">sosta media</div></div>
+          <div class="kpi"><div class="v">${longest != null ? dur(longest) : "—"}</div><div class="k">sosta più lunga</div></div>
+        </div>
+        ${all.byOp.length > 1 ? `<div class="chips" role="group" aria-label="Filtra per azienda">
+          <button class="chipbtn all" data-op="" aria-pressed="${!winFilter}">Tutte · ${all.count}</button>
+          ${all.byOp.map(o => `<button class="chipbtn" data-op="${esc(o.op)}" aria-pressed="${winFilter === o.op}">${badge(o.op, true)}<span class="n">${o.count}</span></button>`).join("")}
+        </div>` : ""}
+      </div>
+      <div class="win-body">
+        ${shown.length ? sections : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
+        <p class="note">Orari stimati dagli orari pubblici: l'abbinamento tra arrivo serale e partenza del mattino segue l'ordine degli orari della stessa azienda.</p>
+      </div>`;
+    $("win").querySelector(".close").onclick = closeWindow;
+    $("depbtn").onclick = () => openDepot(st, count);
+    $("win").querySelectorAll(".chipbtn").forEach(b => b.onclick = () => { winFilter = b.dataset.op; renderWindow(); });
+    $("win").querySelectorAll(".model img").forEach(im => {
+      im.onerror = () => im.remove();
+      im.onclick = () => showPhoto(im.dataset.slug);
+    });
+  }
+
+  // ---------- "Guarda deposito": local map from OpenStreetMap (OpenMapTiles via OpenFreeMap), bundled offline ----------
+  let DEPOTS = null;
+  function loadDepots() {
+    if (DEPOTS) return Promise.resolve(DEPOTS);
+    if (window.__DEPOTS) return Promise.resolve(DEPOTS = window.__DEPOTS);
+    return fetch("depots.json").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .catch(() => new Promise((ok, ko) => { // offline app: the data ships as a script
+        const s = document.createElement("script"); s.src = "depots.js";
+        s.onload = () => ok(window.__DEPOTS); s.onerror = () => ko(new Error("depots")); document.head.appendChild(s);
+      }))
+      .then(d => (DEPOTS = d));
+  }
+  const undelta = (f) => { const o = []; let x = 0, y = 0; for (let i = 0; i < f.length; i += 2) { x += f[i]; y += f[i + 1]; o.push(x, y); } return o; };
+  const pathOf = (f, close) => { let s = ""; for (let i = 0; i < f.length; i += 2) s += (i ? "L" : "M") + f[i] + "," + f[i + 1]; return close ? s + "Z" : s; };
+
+  function openDepot(st, count) {
+    const v = document.createElement("div");
+    v.className = "depview";
+    v.innerHTML = `<div class="dep-head"><div style="flex:1;min-width:0"><span class="eyebrow">Dove dormono i treni · ${count} ${count === 1 ? "treno" : "treni"} stanotte</span><h2>${esc(st.n)}</h2></div><button class="close" aria-label="Chiudi la mappa">×</button></div>
+      <div class="depmap"><div class="loading">Carico la mappa…</div></div>
+      <div class="dep-foot">
+        <div class="dep-modes"><button class="chipbtn all modebtn" data-m="sat" aria-pressed="false">Satellite</button><button class="chipbtn all modebtn" data-m="map" aria-pressed="true">Mappa</button><span class="dep-note" id="satstatus"></span></div>
+        <div class="dep-legend"><span><i style="background:#ffb547"></i>binari di sosta e deposito</span><span><i style="background:#d6dcea"></i>binari di corsa</span><span><i class="box" style="background:#8a97b6"></i>marciapiedi</span><span><i class="box" style="background:#3b2a33"></i>area ferroviaria</span></div>
+        <div class="dep-note" id="depnote"></div>
+        <div class="dep-note"><span id="satnote"></span> Binari © contributori di OpenStreetMap, OpenMapTiles, OpenFreeMap.</div>
+      </div>`;
+    $("modal").appendChild(v);
+    v.querySelector(".close").onclick = () => v.remove();
+    loadDepots().then(D => drawDepot(v, D[st.n] || (st.aka || []).map(n => D[n]).find(Boolean), st)).catch(() => { v.querySelector(".loading").textContent = "Mappa non disponibile per questa stazione."; });
+  }
+
+  function drawDepot(v, m, st) {
+    const box = v.querySelector(".depmap");
+    if (!m) { box.querySelector(".loading").textContent = "Mappa non disponibile per questa stazione."; return; }
+    const f = {}; for (const k in m.f) f[k] = m.f[k].map(undelta);
+    const yards = (f.yard || []).length;
+    v.querySelector("#depnote").textContent = yards
+      ? "I treni passano la notte sui binari della stazione o sui binari di sosta e deposito evidenziati in arancione. La mappa non indica il binario preciso di ogni treno."
+      : "Qui non risultano binari di deposito mappati: di notte i treni restano fermi ai binari della stazione.";
+    const NS = "http://www.w3.org/2000/svg";
+    const svgD = document.createElementNS(NS, "svg");
+    const mk = (tag, a, p) => { const e = document.createElementNS(NS, tag); for (const k in a) e.setAttribute(k, a[k]); (p || svgD).appendChild(e); return e; };
+    const g = mk("g", {});
+    const layer = (k, cls, close, w, parent) => (f[k] || []).forEach(pts => { if (pts.length >= 4) { const e = mk("path", { d: pathOf(pts, close), class: cls }, parent || g); if (w) e.style.strokeWidth = w; } });
+    // drawn map (always available offline)
+    const drawn = mk("g", {}, g);
+    layer("water", "d-water", true, 0, drawn); layer("rland", "d-rland", true, 0, drawn); layer("bld", "d-bld", true, 0, drawn);
+    layer("minor", "d-minor", false, 4, drawn); layer("road", "d-road", false, 7, drawn);
+    layer("plat", "d-plat", true, 0, drawn); layer("main", "d-main", false, 2.4, drawn);
+    // aerial photo (needs a connection): the region's own orthophoto where one is published,
+    // otherwise the national colour orthophoto 2012 (Geoportale Nazionale, MASE)
+    const R = 750, lat0 = st.lat, lon0 = st.lon;
+    // local metres (x east, y south of the station) -> WMS bbox in the service's projection
+    const kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540, Rm = 6378137;
+    const toLL = (x, y) => [lat0 - y / ky, lon0 + x / kx];
+    const merc = (lat, lon) => [lon * Math.PI / 180 * Rm, Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) * Rm];
+    const bboxFor = (crs, x0, y0, x1, y1) => {
+      const [latN, lonW] = toLL(x0, y0), [latS, lonE] = toLL(x1, y1);
+      if (crs === "3857") { const [a, b] = merc(latS, lonW), [c, d] = merc(latN, lonE); return [a, b, c, d].map(v => v.toFixed(1)).join(","); }
+      return [latS, lonW, latN, lonE].map(v => v.toFixed(6)).join(","); // WMS 1.3.0 EPSG:4326 = lat,lon
+    };
+    const src = (base, layer, crs, credit) => ({ credit, url: (x0, y0, x1, y1, w, h) =>
+      `${base}${base.includes("?") ? "&" : "?"}service=WMS&version=1.3.0&request=GetMap&styles=&format=image/jpeg`
+      + `&layers=${encodeURIComponent(layer)}&crs=EPSG:${crs}&bbox=${bboxFor(crs, x0, y0, x1, y1)}&width=${w}&height=${h}` });
+    const REGIONAL = {
+      "Trentino-Alto Adige": lat0 >= 46.35 ? src("https://geoservices.buergernetz.bz.it/mapproxy/p_bz-Orthoimagery/wms", "Aerial-2023-RGB", "3857", "Foto aerea 2023 · Provincia autonoma di Bolzano (CC BY 4.0).") : null,
+      "Piemonte": src("https://geomap.reteunitaria.piemonte.it/mapproxy/service", "rp_ortofoto_2010", "3857", "Foto aerea 2010 · Regione Piemonte."),
+      "Puglia": src("https://webapps.sit.puglia.it/arcgis/services/BaseMaps/Ortofoto2019/ImageServer/WMSServer", "0", "3857", "Foto aerea 2019 · Regione Puglia, SIT Puglia."),
+      "Veneto": src("https://idt2-geoserver.regione.veneto.it/geoserver/wms", "rv:ortofoto_agea_2024", "4326", "Foto aerea AGEA 2024 · Regione Veneto (tutti i diritti riservati AGEA)."),
+      "Sardegna": src("https://webgis.regione.sardegna.it/geoserverraster/ows", "raster:Mosaico_ortofoto_2022", "3857", "Foto aerea 2022 · Regione Autonoma della Sardegna."),
+    };
+    const national = src("https://wms.pcn.minambiente.it/ogc?map=/ms_ogc/WMS_v1.3/raster/ortofoto_colore_12.map",
+      lon0 < 12 ? "OI.ORTOIMMAGINI.2012.32" : "OI.ORTOIMMAGINI.2012.33", "3857", "Foto aerea 2012 · Geoportale Nazionale, Ministero dell'Ambiente.");
+    const satSources = [REGIONAL[st.r], national].filter(Boolean);
+    let satSrc = null; // the source that answered
+    const satG = mk("g", {}, g);
+    g.insertBefore(satG, drawn);
+    const sat = mk("image", { x: -R, y: -R, width: 2 * R, height: 2 * R, preserveAspectRatio: "none", class: "d-sat" }, satG);
+    // sharper photo of just the area on screen, fetched again whenever you zoom in or move
+    const satHi = mk("image", { preserveAspectRatio: "none" }, satG);
+    satG.style.display = "none";
+    const yardLayer = mk("g", {}, g);
+    layer("yard", "d-yardglow", false, 11, yardLayer); layer("yard", "d-yard", false, 3.2, yardLayer);
+    let mode = "map";
+    const setMode = (m) => {
+      mode = m;
+      satG.style.display = m === "sat" ? "" : "none";
+      sat.style.display = "";
+      if (m === "sat") refineSoon();
+      drawn.style.display = m === "sat" ? "none" : "";
+      yardLayer.classList.toggle("onsat", m === "sat");
+      v.querySelectorAll(".modebtn").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.m === m)));
+      v.querySelector("#satnote").textContent = m === "sat" ? satCredit : "";
+    };
+    // load the photo with a plain Image first (reliable load/error events), then hand it to the SVG
+    const satStatus = v.querySelector("#satstatus");
+    let satReady = false, satCredit = "";
+    const offlineMsg = "Foto aerea non disponibile ora (manca la connessione o il servizio delle foto non risponde): mostro la mappa disegnata. Tocca Satellite per riprovare.";
+    // the server answers with an XML error page (not an image) when it is down: the Image fails and we keep the drawn map
+    // full detail first (1024 px); if the Geoportale's detailed archive is down, its low-detail overview (256 px) still answers
+    const loadSat = () => {
+      satStatus.textContent = "Carico la foto aerea…";
+      // try the sources in order (regional first, then national); a service that is down answers with an error page, not an image
+      const tryAt = (i) => {
+        if (i >= satSources.length) { satStatus.textContent = offlineMsg; setMode("map"); return; }
+        const s = satSources[i];
+        const url = s.url(-R, -R, R, R, 1024, 1024);
+        const probe = new Image();
+        probe.onload = () => {
+          if (!probe.naturalWidth) return tryAt(i + 1);
+          sat.setAttribute("href", url); satReady = true; satSrc = s; satCredit = s.credit; satStatus.textContent = ""; setMode("sat");
+        };
+        probe.onerror = () => tryAt(i + 1);
+        probe.src = url;
+      };
+      tryAt(0);
+    };
+    // when the view is closer than the base photo's detail (~1.5 m/px), ask the same service for the visible area only
+    let refineTimer = null, refineSeq = 0;
+    function refineSoon() {
+      clearTimeout(refineTimer);
+      refineTimer = setTimeout(() => {
+        if (!satReady || !satSrc || mode !== "sat" || !vb2) return;
+        const r = box.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const mPerPx = vb2.w / (r.width * dpr);
+        if (mPerPx > (2 * R) / 1024 * 0.9) { satHi.style.display = "none"; return; } // base photo is already sharp enough
+        const pad = 0.15; // fetch a little around the screen so small moves stay sharp
+        const x0 = vb2.x - vb2.w * pad, y0 = vb2.y - vb2.h * pad, x1 = vb2.x + vb2.w * (1 + pad), y1 = vb2.y + vb2.h * (1 + pad);
+        let w = Math.round(r.width * dpr * (1 + 2 * pad)), h = Math.round(r.height * dpr * (1 + 2 * pad));
+        const s = Math.min(1, 2048 / Math.max(w, h)); w = Math.round(w * s); h = Math.round(h * s);
+        const url = satSrc.url(x0, y0, x1, y1, w, h);
+        const seq = ++refineSeq;
+        const probe = new Image();
+        probe.onload = () => {
+          if (seq !== refineSeq || !probe.naturalWidth) return;
+          satHi.setAttribute("href", url);
+          satHi.setAttribute("x", x0); satHi.setAttribute("y", y0); satHi.setAttribute("width", x1 - x0); satHi.setAttribute("height", y1 - y0);
+          satHi.style.display = "";
+        };
+        probe.src = url;
+      }, 450);
+    }
+    loadSat();
+    v.querySelectorAll(".modebtn").forEach(b => b.onclick = () => {
+      if (b.dataset.m === "sat" && !satReady) return loadSat();
+      setMode(b.dataset.m);
+    });
+    const labs = mk("g", {});
+    const seen = new Set();
+    for (const [x, y, name] of m.poi || []) {
+      if (seen.has(name)) continue; seen.add(name);
+      mk("circle", { cx: x, cy: y, r: 9, class: "d-poi" }, labs).style.strokeWidth = 3;
+      if (name) { const t = mk("text", { x: x + 14, y: y + 6, class: "d-poilab", "font-size": 22 }, labs); t.style.strokeWidth = 5; t.textContent = name; }
+    }
+    box.innerHTML = "";
+    box.appendChild(svgD);
+    const ui = document.createElement("div"); ui.className = "ui";
+    ui.innerHTML = `<button class="btn" aria-label="Ingrandisci">+</button><button class="btn" aria-label="Riduci">−</button><button class="btn" aria-label="Torna alla stazione" style="font-size:13px">⤢</button>`;
+    box.appendChild(ui);
+    // zoomed on the station; pan with a finger, pinch or wheel to zoom
+    const [cx, cy] = m.c || [0, 0];
+    let w0 = 650, vb2;
+    const fit = () => { const r = box.getBoundingClientRect(); const ar = r.width > 0 && r.height > 0 ? r.width / r.height : 0.6; vb2 = ar >= 1 ? { w: w0 * ar, h: w0 } : { w: w0, h: w0 / ar }; vb2.x = cx - vb2.w / 2; vb2.y = cy - vb2.h / 2; apply(); };
+    const apply = () => {
+      svgD.setAttribute("viewBox", `${vb2.x} ${vb2.y} ${vb2.w} ${vb2.h}`);
+      if (mode === "sat") refineSoon();
+      const k = vb2.w / box.getBoundingClientRect().width; // metres per pixel: keep labels a readable size
+      labs.querySelectorAll("text").forEach(t => { t.setAttribute("font-size", 14 * k); t.style.strokeWidth = 3.5 * k; });
+      labs.querySelectorAll("circle").forEach(c => { c.setAttribute("r", 6 * k); c.style.strokeWidth = 2 * k; });
+    };
+    const zoom = (s, px, py) => { const nw = Math.min(Math.max(vb2.w / s, 120), 2400); const kk = nw / vb2.w; vb2 = { x: px - (px - vb2.x) * kk, y: py - (py - vb2.y) * kk, w: nw, h: vb2.h * kk }; apply(); };
+    const toU = (X, Y) => { const r = svgD.getBoundingClientRect(); return { x: vb2.x + (X - r.left) / r.width * vb2.w, y: vb2.y + (Y - r.top) / r.height * vb2.h }; };
+    const [bIn, bOut, bFit] = ui.querySelectorAll("button");
+    bIn.onclick = () => zoom(1.5, vb2.x + vb2.w / 2, vb2.y + vb2.h / 2);
+    bOut.onclick = () => zoom(1 / 1.5, vb2.x + vb2.w / 2, vb2.y + vb2.h / 2);
+    bFit.onclick = fit;
+    svgD.addEventListener("wheel", e => { e.preventDefault(); const p = toU(e.clientX, e.clientY); zoom(e.deltaY < 0 ? 1.25 : 0.8, p.x, p.y); }, { passive: false });
+    const P = new Map(); let pinch = null;
+    svgD.addEventListener("pointerdown", e => { svgD.setPointerCapture(e.pointerId); P.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
+    svgD.addEventListener("pointermove", e => {
+      if (!P.has(e.pointerId)) return;
+      const prev = P.get(e.pointerId); P.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (P.size === 1) { const r = svgD.getBoundingClientRect(); vb2.x -= (e.clientX - prev.x) / r.width * vb2.w; vb2.y -= (e.clientY - prev.y) / r.height * vb2.h; apply(); }
+      else if (P.size === 2) { const [a, b] = [...P.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch) { const c = toU((a.x + b.x) / 2, (a.y + b.y) / 2); zoom(d / pinch, c.x, c.y); } pinch = d; }
+    });
+    const end = e => { P.delete(e.pointerId); if (P.size < 2) pinch = null; };
+    svgD.addEventListener("pointerup", end); svgD.addEventListener("pointercancel", end);
+    fit();
+  }
+
+  // enlarged photo with its credit
+  function showPhoto(slug) {
+    const c = (DATA.credits && DATA.credits.models[slug]) || {};
+    const v = document.createElement("div");
+    v.className = "photoview";
+    v.innerHTML = `<figure><img src="img/models/${slug}.jpg" alt="${esc(MODELS[slug])}"><figcaption><strong>${esc(MODELS[slug])}</strong> · foto del modello<br>
+      <span>Foto: ${esc(c.author || "Wikimedia Commons")} · ${esc(c.license || "")} · Wikimedia Commons</span></figcaption></figure>`;
+    v.onclick = () => v.remove();
+    $("modal").appendChild(v);
+  }
+
+  function methodNote() {
+    return `<div class="note">
+      <p><strong>Come è calcolato.</strong> Per ogni stazione e per ogni azienda cerchiamo i treni che terminano la corsa la sera senza ripartire e quelli che iniziano la corsa il mattino dopo senza arrivare da un'altra stazione. Arrivi e partenze della stessa azienda sono abbinati in ordine di orario; la sosta è la differenza. È una stima: gli orari pubblici non dicono quale convoglio fa quale corsa.</p>
+      <p><strong>Fonti.</strong> Orari regionali Trenitalia (14 novembre – 12 dicembre 2026, con Tper, TUA, SAD e TFT); GTFS ufficiali di Trenord, EAV, ARST e Trentino Trasporti; programmi di esercizio 2026 di Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria e FAL dal portale open data della Regione Puglia; orari PDF della Circumetnea (dal 16 marzo 2026, solo feriali) e di Ferrovie della Calabria (Catanzaro e Cosenza, considerati dal lunedì al sabato perché l'orario non indica i giorni).</p>
+    </div>`;
+  }
+
+  // ---------- informazioni ----------
+  const APP_VERSION = "2.1.0";
+  function openInfo() {
+    selected = null;
+    $("win").innerHTML = `
+      <div class="win-head">
+        <div class="win-title">
+          <img src="logo.svg" alt="" width="56" height="56" style="border-radius:12px;flex:none">
+          <div><div class="eyebrow">Versione ${APP_VERSION}</div><h2 class="stname" id="wtitle">SleepyTrain</h2>
+            <div class="aka">Dove dormono i treni regionali in Italia</div></div>
+          <button class="close" aria-label="Chiudi">×</button>
+        </div>
+      </div>
+      <div class="win-body note" style="font-size:13px;color:var(--fg)">
+        <p><strong>Cosa mostra.</strong> Per ogni città e paese, i treni che passano la notte in stazione: arrivo serale, partenza del mattino, tempo di sosta e azienda. Funziona senza connessione: tutti i dati sono dentro l'app.</p>
+        <p><strong>Periodo dei dati.</strong> Orario dal ${fmtDay(DATA.period[0], { day: "numeric", month: "long" })} al ${fmtDay(DATA.period[1], { day: "numeric", month: "long", year: "numeric" })}. Fuori da questo periodo l'app mostra la notte equivalente con lo stesso giorno della settimana.</p>
+        <p><strong>È una stima.</strong> Gli orari pubblici non dicono quale convoglio fa quale corsa: arrivi serali e partenze del mattino della stessa azienda sono abbinati in ordine di orario. Non usare l'app per decisioni operative o di sicurezza.</p>
+        <p><strong>Fonti degli orari.</strong> Trenitalia, Orario Regionale Digitale (comprende servizi Tper, TUA, SAD, TFT e Ferrovia Centrale Umbra). Trenord, GTFS dal portale open data di Regione Lombardia (CC BY 4.0). EAV, ARST, Trentino Trasporti: GTFS pubblicati dalle aziende. Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria: programmi di esercizio 2026, open data Regione Puglia (CC BY 4.0). FAL, Ferrovia Circumetnea, Ferrovie della Calabria, SSIF Vigezzina: orari PDF pubblicati dalle aziende. Non incluse perché oggi servite solo da bus sostitutivi o senza orario pubblicato: Udine–Cividale, Genova–Casella, Roma–Lido, Roma–Viterbo.</p>
+        <p><strong>Treni mostrati.</strong> Certi: un arrivo serale che non riparte più quel giorno, abbinato a una prima partenza del mattino dalla stessa stazione e della stessa azienda. Probabili (circa 80%): una prima partenza tra le 3 e le 9 senza nessun treno arrivato prima; il treno era lì nella notte, ma il suo arrivo non è negli orari pubblici (spesso arriva a vuoto da un deposito vicino).</p>
+        <p><strong>Modelli dei treni.</strong> Il modello è "indicato" quando lo riporta l'azienda nei suoi dati; altrimenti è il materiale tipico di quell'azienda o linea, e quella notte potrebbe dormire un treno diverso. Sulle linee senza elettrificazione (dati OpenStreetMap) è indicato un treno diesel.</p>
+        <p><strong>Foto e loghi</strong> da Wikimedia Commons. I loghi sono marchi delle rispettive aziende.<br>${(() => {
+          const c = DATA.credits || { models: {}, logos: {} };
+          const m = Object.values(c.models).map(x => `${esc(x.name)}: ${esc(x.author || "autore su Commons")} (${esc(x.license)})`);
+          const l = Object.entries(c.logos).map(([op, x]) => `logo ${esc(op)} (${esc(x.license)})`);
+          return [...m, ...l].join("; ");
+        })()}.</p>
+        <p><strong>Mappe dei depositi.</strong> Binari, scali, marciapiedi e strade intorno a ogni stazione: © contributori di OpenStreetMap (ODbL), schema OpenMapTiles, riquadri OpenFreeMap. Sono incluse nell'app e funzionano senza connessione. La foto aerea si carica solo con internet, dai servizi pubblici delle Regioni dove disponibili (Provincia di Bolzano 2023, Piemonte 2010, Puglia 2019, Veneto AGEA 2024, Sardegna 2022) e altrove dall'ortofoto nazionale 2012 del Geoportale Nazionale (Ministero dell'Ambiente), quando il servizio è attivo.</p>
+        <p><strong>Mappa.</strong> Posizione delle stazioni © contributori di OpenStreetMap (ODbL). Confini regionali ISTAT, via openpolis/geojson-italy (CC BY 4.0). Confini nazionali Natural Earth (pubblico dominio).</p>
+        <p><strong>Note.</strong> SleepyTrain non è collegata a nessuna delle aziende citate; i nomi delle aziende identificano solo chi gestisce i treni.</p>
+      </div>`;
+    $("win").querySelector(".close").onclick = closeWindow;
+    $("modal").hidden = false;
+    document.body.classList.add("modal-open");
+    $("win").querySelector(".close").focus();
+  }
+  $("infobtn").onclick = () => { if (DATA) openInfo(); };
+
+  // ---------- controlli ----------
+  function render() {
+    $("pick").value = night;
+    const e = effective(night);
+    const b = $("banner");
+    if (e.mapped) {
+      b.textContent = `L'orario disponibile va dal 14 novembre al 12 dicembre 2026. Per la notte scelta mostro la notte equivalente di ${fmtDay(e.d, { weekday: "long", day: "numeric", month: "long" })}.`;
+      b.classList.add("on");
+    } else b.classList.remove("on");
+    drawStations();
+    renderPanel();
+    if (selected) renderWindow();
+  }
+  $("prev").onclick = () => { night = addDays(night, -1); render(); };
+  $("next").onclick = () => { night = addDays(night, 1); render(); };
+  $("pick").onchange = (e) => { if (e.target.value) { night = e.target.value; render(); } };
+  // choosing an operator shows it across Italy: leave any region and frame all of its stations
+  $("opfilter").onchange = (e) => {
+    opFilter = e.target.value;
+    updateRegionMenu();
+    if (opFilter) {
+      region = ""; $("regfilter").value = "";
+      const sts = DATA.st.filter(s => hasOp(s, opFilter));
+      if (sts.length) {
+        const xs = sts.map(s => s.x), ys = sts.map(s => s.y), pad = 25;
+        const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad, y0 = Math.min(...ys) - pad, y1 = Math.max(...ys) + pad;
+        const ar = aspect(svg.getBoundingClientRect());
+        let w = Math.max(x1 - x0, 60), h = Math.max(y1 - y0, 60);
+        if (w / h < ar) w = h * ar; else h = w / ar;
+        vb = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h };
+        applyVB();
+      }
+    } else fitView();
+    drawStations(); renderPanel();
+  };
+  $("regfilter").onchange = (e) => setRegion(e.target.value);
+  // ---------- ricerca con suggerimenti ----------
+  // the list updates at every letter; picking a town shows its region with all operators and opens it
+  const fold = (t) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/['’.\-]/g, " ").replace(/\s+/g, " ").trim();
+  let suggList = [], suggAct = -1;
+  function searchStations(q) {
+    const v = fold(q); if (!v) return [];
+    const scored = [];
+    for (const s of DATA.st) {
+      let best = 9;
+      for (const name of [s.n, ...(s.aka || [])]) {
+        const f = fold(name);
+        const sc = f === v ? 0 : f.startsWith(v) ? 1 : (" " + f).includes(" " + v) ? 2 : f.includes(v) ? 3 : 9;
+        if (sc < best) best = sc;
+      }
+      if (best < 9) scored.push([best, s]);
+    }
+    scored.sort((a, b) => a[0] - b[0] || a[1].n.localeCompare(b[1].n, "it"));
+    return scored.slice(0, 10).map(x => x[1]);
+  }
+  function hiName(name, q) {
+    const f = fold(name), v = fold(q), i = f.indexOf(v);
+    // folding keeps the length for Italian names (accents and apostrophes become one character), so indexes match
+    if (i < 0 || f.length !== name.length) return esc(name);
+    return esc(name.slice(0, i)) + "<b>" + esc(name.slice(i, i + v.length)) + "</b>" + esc(name.slice(i + v.length));
+  }
+  function showSugg() {
+    const q = $("q").value, box = $("sugg");
+    suggList = searchStations(q); suggAct = suggList.length ? 0 : -1;
+    if (!fold(q)) { hideSugg(); return; }
+    box.innerHTML = suggList.length
+      ? suggList.map((s, i) => `<button type="button" role="option" data-i="${i}" class="${i === suggAct ? "act" : ""}"><span>${hiName(s.n, q)}</span><span class="rg">${esc(s.r === "Estero" ? "Estero" : s.r)}</span></button>`).join("")
+      : `<div class="none">Nessuna città trovata</div>`;
+    box.hidden = false; $("q").setAttribute("aria-expanded", "true");
+    // click (not touch start) so a finger can still scroll the list
+    box.querySelectorAll("button").forEach(b => { b.onclick = () => pickStation(suggList[+b.dataset.i]); });
+  }
+  function hideSugg() { $("sugg").hidden = true; $("q").setAttribute("aria-expanded", "false"); }
+  function markSugg() { $("sugg").querySelectorAll("button").forEach((b, i) => b.classList.toggle("act", i === suggAct)); const a = $("sugg").querySelector(".act"); if (a) a.scrollIntoView({ block: "nearest" }); }
+  function pickStation(st) {
+    if (!st) return;
+    hideSugg();
+    $("q").value = st.n; $("q").blur();
+    // all operators, then the town's region (abroad: stay on Italy and zoom on the town)
+    opFilter = ""; $("opfilter").value = ""; updateRegionMenu();
+    if (st.r && st.r !== "Estero" && DATA.regions.some(g => g.n === st.r)) setRegion(st.r);
+    else { region = ""; $("regfilter").value = ""; const w = full.w / 6; vb = { x: st.x - w / 2, y: st.y - (w * vb.h / vb.w) / 2, w, h: w * vb.h / vb.w }; applyVB(); renderPanel(); }
+    drawStations();
+    openStation(st);
+  }
+  $("q").addEventListener("input", showSugg);
+  $("q").addEventListener("focus", () => { if (fold($("q").value)) showSugg(); });
+  // close the list when touching anywhere else
+  const outside = (e) => { if (!e.target.closest || !e.target.closest(".qwrap")) hideSugg(); };
+  document.addEventListener(window.PointerEvent ? "pointerdown" : "touchstart", outside, true);
+  if (!window.PointerEvent) document.addEventListener("mousedown", outside, true);
+  $("q").addEventListener("keydown", (e) => {
+    if ($("sugg").hidden && e.key !== "Enter") return;
+    if (e.key === "ArrowDown") { e.preventDefault(); suggAct = Math.min(suggList.length - 1, suggAct + 1); markSugg(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); suggAct = Math.max(0, suggAct - 1); markSugg(); }
+    else if (e.key === "Enter") { e.preventDefault(); if ($("sugg").hidden) showSugg(); pickStation(suggList[Math.max(0, suggAct)]); }
+    else if (e.key === "Escape") { hideSugg(); }
+  });
+
+  // ---------- avvio ----------
+  (window.__DATA ? Promise.resolve(window.__DATA) : fetch("data.json").then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })).then(d => {
+    DATA = d;
+    $("loading").remove();
+    const present = new Set(); d.st.forEach(s => Object.values(s.k).forEach(n => Object.keys(n).forEach(op => present.add(op))));
+    $("opfilter").innerHTML = `<option value="">Tutte le aziende</option>` + Object.keys(OPS).filter(op => present.has(op)).map(op => `<option value="${esc(op)}">${esc(op)}</option>`).join("");
+    $("regfilter").innerHTML = `<option value="">Tutta Italia</option>` + d.regions.map(r => `<option value="${esc(r.n)}">${esc(r.n)}</option>`).join("");
+    night = currentNight();
+    buildMap();
+    render();
+    window.__appStarted = true;
+  }).catch(err => { window.__bootFail && window.__bootFail("Non riesco a caricare gli orari (" + err.message + ")."); });
+})();
+</script>
+<div id="a2hs" hidden style="position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom, 0px));z-index:50;background:#111a2c;color:#e6ebf5;border:1px solid #ffb547;border-radius:12px;padding:12px 40px 12px 14px;font:14px/1.45 sans-serif;box-shadow:0 12px 30px rgba(0,0,0,.5)">
+  <b>Installa SleepyTrain</b><br>Tocca <b>Condividi</b> <span aria-hidden="true">⬆︎</span> e poi <b>Aggiungi alla schermata Home</b>: l'app funzionerà anche senza internet.
+  <button type="button" id="a2hsx" aria-label="Chiudi" style="position:absolute;top:6px;right:6px;background:none;border:0;color:#8d9bb8;font-size:22px;padding:4px 10px">×</button>
+</div>
+<script>
+(function () {
+  if ("serviceWorker" in navigator) {
+    var reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      // a new version has been stored: show it, but never interrupt an open window
+      if (reloaded || !window.__appStarted) return; reloaded = true;
+      if (!document.querySelector(".depview,.photoview") && document.getElementById("modal").hidden) location.reload();
+    });
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  }
+  try {
+    var ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var standalone = window.navigator.standalone || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    if (ios && !standalone && !localStorage.getItem("a2hs-seen")) {
+      var b = document.getElementById("a2hs"); b.hidden = false;
+      document.getElementById("a2hsx").onclick = function () { b.hidden = true; try { localStorage.setItem("a2hs-seen", "1"); } catch (e) {} };
+    }
+  } catch (e) { }
+})();
+</script>
