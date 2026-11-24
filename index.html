@@ -545,14 +545,14 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 
   // ---------- dati ----------
   // st.k[date] = { operator: [pairs, arrOnly, depOnly] }
-  // Five probability levels. Trains are counted for the top three; "bassa" and "bassissima" count 0.
+  // Five probability levels. Trains are counted for the top three; "bassa" and "molto bassa" count 0.
   //  5 altissima: evening arrival + morning departure in the timetables, or reported by the staff
   //  4 alta:      first departure at dawn with no arrival before it (the arrival was an empty run)
   //  3 media:     the night before a Sunday/holiday the unit stays until the next working day; or a possible depot (deduced)
   //  2 bassa:     evening arrival with no departure from here the next morning
-  //  1 bassissima: possible depot with a weak signal
+  //  1 molto bassa: possible depot with a weak signal
   const LV = { 5: { n: "altissima", c: "#5fd39a" }, 4: { n: "alta", c: "#7cc4ff" }, 3: { n: "media", c: "#ffb547" },
-    2: { n: "bassa", c: "#ef8a5a" }, 1: { n: "bassissima", c: "#9aa6c0" } };
+    2: { n: "bassa", c: "#ef8a5a" }, 1: { n: "molto bassa", c: "#9aa6c0" } };
   const lvChip = (l, extra) => `<span class="chip lvchip" style="--lv:${LV[l].c}">probabilità ${LV[l].n}${extra ? " · " + extra : ""}</span>`;
   // possible depots are deduced from weekday nights: not shown the night before a Sunday or a holiday
   const weekdayNight = (d) => { const nx = addDays(d, 1); return new Date(nx + "T12:00:00Z").getUTCDay() !== 0 && !(DATA.holidays || []).includes(nx); };
@@ -709,7 +709,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       const mainOp = n.byOp.length ? n.byOp[0].op : null;
       if (!faded && n.sure === 0) {
         // no certain train: only uncertain ones. Dashed ring sized by the trains counted (alta/media);
-        // small dotted ring when only "bassa"/"bassissima" (0 trains counted)
+        // small dotted ring when only "bassa"/"molto bassa" (0 trains counted)
         const only0 = n.count === 0;
         const rad = only0 ? radOf(1, 3) * 0.8 : radOf(n.count, st.t);
         if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
@@ -852,7 +852,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       regionBars = `<div><h3>Per regione</h3><div class="regbars">${rs.map(([r, c]) => `<button data-r="${esc(r)}" title="Mostra ${esc(r)}"><span class="rn">${esc(r)}</span><span class="bar" style="width:${Math.max(2, c / rmax * 100)}%"></span><span class="c">${c}</span></button>`).join("")}</div></div>`;
     }
     const occ = occupancy(ranked.map(x => x.st), ed);
-    // trains per probability level (bassa / bassissima: places, 0 trains)
+    // trains per probability level (bassa / molto bassa: places, 0 trains)
     const lvTot = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
     const allIn = DATA.st.filter(inScope).map(st => ({ st, n: nightOf(st, ed, opFilter) }));
     for (const x of allIn) for (const o of x.n.byOp) for (const l in lvTot) lvTot[l] += o.lv[l];
@@ -1045,8 +1045,8 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         <div>${lvChip(l)}<span class="chip pdchip">deposito possibile</span></div>
         <div class="big">${p.lv === "c" ? (p.n ? `${p.n} treni` : "Treni in sosta notturna (contato 1)") : `${n} ${n === 1 ? "treno" : "treni"} contati${l === 3 ? " (stima)" : ""}`}</div>
         ${p.why.length ? `<ul>${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
-        ${p.yard ? `<div class="lonely">Qui ci sono circa ${p.yard >= 1000 ? (p.yard / 1000).toFixed(1).replace(".", ",") + " km" : p.yard + " m"} di binari di sosta (OpenStreetMap).</div>` : ""}
-        ${p.lv === "c" ? "" : `<div class="lonely">Dedotto dagli orari: i treni ci arriverebbero e ripartirebbero a vuoto. Da verificare sul posto.</div>`}
+        ${p.yard && !p.why.some(w => w.includes("binari di sosta")) ? `<div class="lonely">Qui ci sono circa ${p.yard >= 1000 ? (p.yard / 1000).toFixed(1).replace(".", ",") + " km" : p.yard + " m"} di binari di sosta (OpenStreetMap).</div>` : ""}
+        ${p.lv === "c" ? "" : p.lv === "b" ? `<div class="lonely">Da verificare sul posto.</div>` : `<div class="lonely">Dedotto dagli orari: i treni ci arriverebbero e ripartirebbero a vuoto. Da verificare sul posto.</div>`}
       </section>`;
     };
     const sections = shown.map(o => {
@@ -1110,7 +1110,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       </div>
       <div class="win-body">
         ${shown.length ? sections : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
-        <div class="lvscale">Probabilità: ${[5, 4, 3, 2, 1].map(l => lvChip(l)).join("")}<span>bassa e bassissima contano 0 treni</span></div>
+        <div class="lvscale">Probabilità: ${[5, 4, 3, 2, 1].map(l => lvChip(l)).join("")}<span>bassa e molto bassa contano 0 treni</span></div>
         <p class="note">Orari stimati dagli orari pubblici: l'abbinamento tra arrivo serale e partenza del mattino segue l'ordine degli orari della stessa azienda.</p>
       </div>`;
     $("win").querySelector(".close").onclick = closeWindow;
@@ -1327,14 +1327,14 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   function methodNote() {
     return `<div class="note">
       <p><strong>Come è calcolato.</strong> Per ogni stazione e per ogni azienda cerchiamo i treni che terminano la corsa la sera senza ripartire e quelli che iniziano la corsa il mattino dopo senza arrivare da un'altra stazione. Arrivi e partenze della stessa azienda sono abbinati in ordine di orario; la sosta è la differenza. È una stima: gli orari pubblici non dicono quale convoglio fa quale corsa.</p>
-      <p><strong>Cinque livelli di probabilità.</strong> <em>Altissima</em>: arrivo la sera e partenza la mattina negli orari (pallino pieno). <em>Alta</em>: prima partenza all'alba senza arrivo la sera prima. <em>Media</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure deposito possibile dedotto dagli orari. <em>Bassa</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Bassissima</em>: deposito possibile con un indizio debole. I livelli incerti sono tratteggiati; bassa e bassissima contano 0 treni (cerchio puntinato).</p>
+      <p><strong>Cinque livelli di probabilità.</strong> <em>Altissima</em>: arrivo la sera e partenza la mattina negli orari (pallino pieno). <em>Alta</em>: prima partenza all'alba senza arrivo la sera prima. <em>Media</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure deposito possibile dedotto dagli orari. <em>Bassa</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Molto bassa</em>: deposito possibile con un indizio debole, oppure stazione dove l'azienda ha binari di sosta propri (almeno 500 m) ma negli orari nessun suo treno dorme lì. I livelli incerti sono tratteggiati; bassa e molto bassa contano 0 treni (cerchio puntinato).</p>
       <p><strong>Depositi possibili.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono i <em>depositi possibili</em>, con una stima del numero di treni, da verificare.</p>
       <p><strong>Fonti.</strong> Orari regionali Trenitalia (14 novembre – 12 dicembre 2026, con Tper, TUA, SAD e TFT); GTFS ufficiali di Trenord, EAV, ARST e Trentino Trasporti; programmi di esercizio 2026 di Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria e FAL dal portale open data della Regione Puglia; orari PDF della Circumetnea (dal 16 marzo 2026, solo feriali) e di Ferrovie della Calabria (Catanzaro e Cosenza, considerati dal lunedì al sabato perché l'orario non indica i giorni).</p>
     </div>`;
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.3.1";
+  const APP_VERSION = "2.4.0";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
