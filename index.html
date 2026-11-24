@@ -257,6 +257,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 /* bassa / molto bassa (0 trains): almost transparent, they must look "not active" */
 .st.lowdot { fill-opacity: .16; stroke: currentColor; stroke-width: .7; stroke-opacity: .3; }
 .st.lowdot:hover { fill-opacity: .45; }
+.st.inert { pointer-events: none; cursor: default; }
 .st.lowdash { fill: rgba(11, 18, 32, .35) !important; stroke-dasharray: 2 1.6; stroke-width: 1.4; stroke-opacity: .85; }
 .lab.low { opacity: .45; }
 .st.lowdot.sel { fill: #fff !important; fill-opacity: 1; }
@@ -348,11 +349,11 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       <svg width="16" height="16"><path d="M8,8L8,2A6,6 0 0 1 13.2,11Z" fill="#14a0de"/><path d="M8,8L13.2,11A6,6 0 1 1 8,2Z" fill="#c8102e"/><circle cx="8" cy="8" r="6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>
       <span>colori delle aziende</span>
       <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="#9cc0ff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>
-      <span>probabili</span>
+      <span>molto probabile / probabile</span>
       <svg width="10" height="16"><circle cx="5" cy="8" r="2.4" fill="#9aa6c0" fill-opacity=".2" stroke="#9aa6c0" stroke-opacity=".35" stroke-width=".7"/></svg>
-      <span>molto bassa (0)</span>
+      <span>improbabile (0)</span>
       <svg width="12" height="16"><circle cx="6" cy="8" r="3.6" fill="none" stroke="#ef8a5a" stroke-width="1.4" stroke-dasharray="2 1.6"/></svg>
-      <span>bassa (0)</span>
+      <span>possibile (0)</span>
     </div>
   </div>
   <aside class="panel" id="panel"></aside>
@@ -558,9 +559,10 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   //  3 media:     the night before a Sunday/holiday the unit stays until the next working day; or a possible depot (deduced)
   //  2 bassa:     evening arrival with no departure from here the next morning
   //  1 molto bassa: possible depot with a weak signal
-  const LV = { 5: { n: "altissima", c: "#5fd39a" }, 4: { n: "alta", c: "#7cc4ff" }, 3: { n: "media", c: "#ffb547" },
-    2: { n: "bassa", c: "#ef8a5a" }, 1: { n: "molto bassa", c: "#9aa6c0" } };
-  const lvChip = (l, extra) => `<span class="chip lvchip" style="--lv:${LV[l].c}">probabilità ${LV[l].n}${extra ? " · " + extra : ""}</span>`;
+  // shown to the user as the kind of depot: certo, molto probabile, probabile, possibile, improbabile
+  const LV = { 5: { n: "certo", c: "#5fd39a" }, 4: { n: "molto probabile", c: "#7cc4ff" }, 3: { n: "probabile", c: "#ffb547" },
+    2: { n: "possibile", c: "#ef8a5a" }, 1: { n: "improbabile", c: "#9aa6c0" } };
+  const lvChip = (l, extra) => `<span class="chip lvchip" style="--lv:${LV[l].c}">deposito ${LV[l].n}${extra ? " · " + extra : ""}</span>`;
   // possible depots are deduced from weekday nights: not shown the night before a Sunday or a holiday
   const weekdayNight = (d) => { const nx = addDays(d, 1); return new Date(nx + "T12:00:00Z").getUTCDay() !== 0 && !(DATA.holidays || []).includes(nx); };
   function nightOf(st, d, only) {
@@ -707,7 +709,11 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       else if (!mine && st.t === 1 && n.sure) items.push({ st, n, faded: true });
     }
     items.sort((a, b) => (b.faded - a.faded) || (a.n.count - b.n.count));
-    shownStations = items.filter(x => !x.faded).map(x => x.st);
+    // "improbabile" depots can be tapped only when zoomed in a lot (map about 60 km across or less)
+    const IMPROB_KM = 60;
+    const improbOnly = (n) => n.count === 0 && !n.byOp.some(o => o.lv[2] > 0);
+    const tappable = (x) => !x.faded && (!improbOnly(x.n) || spanKm < IMPROB_KM || x.st === selected);
+    shownStations = items.filter(tappable).map(x => x.st);
 
     const labels = [];
     const radOf = (c, t) => Math.max(t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(Math.max(c, 1)) * 1.5, 14)) * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
@@ -727,10 +733,12 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st " + (!only0 ? "pd" : bassa ? "lowdash" : "lowdot") + (st === selected ? " sel" : "") }, gSt);
         const bop = bassa ? n.byOp.find(o => o.lv[2] > 0).op : mainOp;
         if (bop) { if (only0 && !bassa) { dot.style.fill = opInfo(bop).c; dot.style.color = opInfo(bop).c; } else dot.style.stroke = opInfo(bop).c; }
-        dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
-        el("title", {}, dot).textContent = only0 ? `${st.n}: probabilità ${bassa ? "bassa" : "molto bassa"}, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
-        // names of the low-probability places only when zoomed in close (about 120 km across)
-        if (only0 ? (st === selected || spanKm < 120) : labelRule(st)) labels.push({ st, rad, faded: false, low: only0 && !bassa && st !== selected, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
+        const inert = only0 && !bassa && spanKm >= IMPROB_KM && st !== selected;
+        if (inert) dot.classList.add("inert");
+        else dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
+        el("title", {}, dot).textContent = only0 ? `${st.n}: deposito ${bassa ? "possibile" : "improbabile"}, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
+        // names: "possibile" when zoomed in close (about 120 km across), "improbabile" only when it can be tapped
+        if (only0 ? (st === selected || spanKm < (bassa ? 120 : IMPROB_KM)) : labelRule(st)) labels.push({ st, rad, faded: false, low: only0 && !bassa && st !== selected, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
         continue;
       }
       const c = n.sure;
@@ -874,9 +882,9 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         ${lvChip(2)}<b>0</b><span>(${lvTot[2]} arrivi)</span> ${lvChip(1)}<b>0</b><span>(${lvTot[1]} luoghi)</span></div>`;
     // uncertain places (no certain train): possible depots and stations with only "bassa" arrivals
     const uncertain = allIn.filter(x => !x.n.sure && (x.n.count || x.n.low)).sort((a, b) => b.n.count - a.n.count || b.n.low - a.n.low);
-    const pdSection = uncertain.length ? `<div><h3>Luoghi incerti</h3>
-        <div class="pdtoggle"><button class="btn" id="pdtoggle" aria-pressed="${showPd}">Probabilità bassa: ${showPd ? "mostrata" : "nascosta"} sulla mappa</button></div>
-        <p class="lonely" style="margin:6px 0">Nessun treno certo: treni probabili (arrivano o ripartono a vuoto, non presenti negli orari pubblici) e luoghi a probabilità bassa, contati come 0 treni.</p>
+    const pdSection = uncertain.length ? `<div><h3>Depositi non certi</h3>
+        <div class="pdtoggle"><button class="btn" id="pdtoggle" aria-pressed="${showPd}">Depositi possibili e improbabili: ${showPd ? "mostrati" : "nascosti"} sulla mappa</button></div>
+        <p class="lonely" style="margin:6px 0">Nessun treno certo: depositi molto probabili e probabili (i treni arrivano o ripartono a vuoto, non presenti negli orari pubblici), e depositi possibili e improbabili, contati come 0 treni.</p>
         <div class="list">${uncertain.slice(0, region ? 150 : 30).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
           <span class="dots">${x.n.byOp.map(o => `<i style="background:transparent;border:2px ${o.count ? "dashed" : "dotted"} ${opInfo(o.op).c}" title="${esc(o.op)}"></i>`).join("")}</span>
           <span class="c">${x.n.count ? "~" + x.n.count : "0"}</span></button>`).join("")}</div></div>` : "";
@@ -886,7 +894,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         ${region ? `<button class="btn" id="allit" style="margin-top:8px">← Tutta Italia</button>` : ""}</div>
       <div class="kpis">
         <div class="kpi"><div class="v">${tot}</div><div class="k">treni in deposito · ${lvTot[5]} certi</div></div>
-        <div class="kpi"><div class="v">${ranked.length}</div><div class="k">città e paesi${lowPlaces.length ? ` · +${lowPlaces.length} incerti` : ""}</div></div>
+        <div class="kpi"><div class="v">${ranked.length}</div><div class="k">città e paesi${lowPlaces.length ? ` · +${lowPlaces.length} possibili o improbabili` : ""}</div></div>
         <div class="kpi"><div class="v">${ops.length}</div><div class="k">aziende</div></div>
       </div>
       ${lvLine}
@@ -1055,7 +1063,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       const l = p.lv === "c" ? 5 : p.lv === "p" ? 3 : 1;
       const n = l === 1 ? 0 : (p.n || 1);
       return `<section class="pdsec${p.lv === "c" ? " ok" : ""}">
-        <div>${lvChip(l)}<span class="chip pdchip">deposito possibile</span></div>
+        <div>${lvChip(l)}</div>
         <div class="big">${p.lv === "c" ? (p.n ? `${p.n} treni` : "Treni in sosta notturna (contato 1)") : `${n} ${n === 1 ? "treno" : "treni"} contati${l === 3 ? " (stima)" : ""}`}</div>
         ${p.why.length ? `<ul>${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
         ${p.yard && !p.why.some(w => w.includes("binari di sosta")) ? `<div class="lonely">Qui ci sono circa ${p.yard >= 1000 ? (p.yard / 1000).toFixed(1).replace(".", ",") + " km" : p.yard + " m"} di binari di sosta (OpenStreetMap).</div>` : ""}
@@ -1089,9 +1097,9 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
           <div><div class="lonely">la mattina da qui non riparte nessun treno: forse riparte a vuoto, o è un errore di lettura degli orari</div></div>
           <div class="dwell"><div class="info">sosta non nota</div></div></div>`).join("");
       const oavg = o.pairs.length ? dur(Math.round(o.pairs.reduce((s, p) => s + p[6], 0) / o.pairs.length)) : "—";
-      const parts = [[5, "altissima"], [4, "alta"], [3, "media"]].filter(([l]) => o.lv[l]).map(([l, nm]) => `${o.lv[l]} ${nm}`);
+      const parts = [[5, "certi"], [4, "molto probabili"], [3, "probabili"]].filter(([l]) => o.lv[l]).map(([l, nm]) => `${o.lv[l]} ${nm}`);
       return `<section class="opsec">
-        <div class="opsec-h">${opLogo(o.op, 30)}<strong>${o.count} ${o.count === 1 ? "treno" : "treni"}</strong><span class="meta">${esc(o.op)}${parts.length ? " · " + parts.join(", ") : ""}${o.low ? ` · ${o.low} a probabilità bassa (0)` : ""} · sosta media ${oavg}</span></div>
+        <div class="opsec-h">${opLogo(o.op, 30)}<strong>${o.count} ${o.count === 1 ? "treno" : "treni"}</strong><span class="meta">${esc(o.op)}${parts.length ? " · " + parts.join(", ") : ""}${o.low ? ` · ${o.low} possibili o improbabili (0)` : ""} · sosta media ${oavg}</span></div>
         ${o.pairs.length + o.long.length + o.dep.length + o.arr.length ? `<div class="tbl">
           <div class="tr head"><div>Treno</div><div>Arriva la sera</div><div></div><div>Riparte il mattino</div><div class="dwell">Sosta</div></div>
           ${rows}${long}${dep}${arr}
@@ -1111,7 +1119,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
           <button class="close" aria-label="Chiudi">×</button>
         </div>
         <div class="kpis">
-          <div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito · ${sureN} certi${count > sureN ? `, ${count - sureN} probabili` : ""}${lowN ? ` · ${lowN} prob. bassa (0)` : ""}</div></div>
+          <div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito · ${sureN} certi${count > sureN ? `, ${count - sureN} probabili` : ""}${lowN ? ` · ${lowN} possibili o improbabili (0)` : ""}</div></div>
           <div class="kpi"><div class="v">${deps[0] || "—"}</div><div class="k">prima partenza</div></div>
           <div class="kpi"><div class="v">${avg != null ? dur(avg) : "—"}</div><div class="k">sosta media</div></div>
           <div class="kpi"><div class="v">${longest != null ? dur(longest) : "—"}</div><div class="k">sosta più lunga</div></div>
@@ -1123,7 +1131,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       </div>
       <div class="win-body">
         ${shown.length ? sections : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
-        <div class="lvscale">Probabilità: ${[5, 4, 3, 2, 1].map(l => lvChip(l)).join("")}<span>bassa e molto bassa contano 0 treni</span></div>
+        <div class="lvscale">${[5, 4, 3, 2, 1].map(l => lvChip(l)).join("")}<span>possibile e improbabile contano 0 treni</span></div>
         <p class="note">Orari stimati dagli orari pubblici: l'abbinamento tra arrivo serale e partenza del mattino segue l'ordine degli orari della stessa azienda.</p>
       </div>`;
     $("win").querySelector(".close").onclick = closeWindow;
@@ -1340,14 +1348,14 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   function methodNote() {
     return `<div class="note">
       <p><strong>Come è calcolato.</strong> Per ogni stazione e per ogni azienda cerchiamo i treni che terminano la corsa la sera senza ripartire e quelli che iniziano la corsa il mattino dopo senza arrivare da un'altra stazione. Arrivi e partenze della stessa azienda sono abbinati in ordine di orario; la sosta è la differenza. È una stima: gli orari pubblici non dicono quale convoglio fa quale corsa.</p>
-      <p><strong>Cinque livelli di probabilità.</strong> <em>Altissima</em>: arrivo la sera e partenza la mattina negli orari (pallino pieno). <em>Alta</em>: prima partenza all'alba senza arrivo la sera prima. <em>Media</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure deposito possibile dedotto dagli orari. <em>Bassa</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Molto bassa</em>: deposito possibile con un indizio debole, oppure stazione dove l'azienda ha binari di sosta propri (almeno 500 m) ma negli orari nessun suo treno dorme lì. I livelli incerti sono tratteggiati; bassa e molto bassa contano 0 treni (cerchio puntinato).</p>
-      <p><strong>Depositi possibili.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono i <em>depositi possibili</em>, con una stima del numero di treni, da verificare.</p>
+      <p><strong>Cinque tipi di deposito.</strong> <em>Certo</em>: arrivo la sera e partenza la mattina negli orari (pallino pieno). <em>Molto probabile</em>: prima partenza all'alba senza arrivo la sera prima. <em>Probabile</em>: la sera prima di una domenica o di un festivo il treno resta fino al primo giorno feriale, oppure stazione vicina con binari di sosta dove finiscono treni che la mattina non ripartono. <em>Possibile</em>: arrivo la sera senza nessuna partenza da qui la mattina. <em>Improbabile</em>: indizio debole, oppure stazione dove l'azienda ha binari di sosta propri (almeno 500 m) ma negli orari nessun suo treno dorme lì. I depositi non certi sono tratteggiati; possibili e improbabili contano 0 treni, e gli improbabili si possono toccare solo ingrandendo molto la mappa.</p>
+      <p><strong>Depositi dedotti dai binari.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono depositi <em>probabili</em> (con una stima del numero di treni) o <em>improbabili</em> se l'indizio è debole, da verificare.</p>
       <p><strong>Fonti.</strong> Orari regionali Trenitalia (14 novembre – 12 dicembre 2026, con Tper, TUA, SAD e TFT); GTFS ufficiali di Trenord, EAV, ARST e Trentino Trasporti; programmi di esercizio 2026 di Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria e FAL dal portale open data della Regione Puglia; orari PDF della Circumetnea (dal 16 marzo 2026, solo feriali) e di Ferrovie della Calabria (Catanzaro e Cosenza, considerati dal lunedì al sabato perché l'orario non indica i giorni).</p>
     </div>`;
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.4.3";
+  const APP_VERSION = "2.5.0";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
