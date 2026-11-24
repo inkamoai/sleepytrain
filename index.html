@@ -257,6 +257,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 /* bassa / molto bassa (0 trains): almost transparent, they must look "not active" */
 .st.lowdot { fill-opacity: .16; stroke: currentColor; stroke-width: .7; stroke-opacity: .3; }
 .st.lowdot:hover { fill-opacity: .45; }
+.st.lowdash { fill: rgba(11, 18, 32, .35) !important; stroke-dasharray: 2 1.6; stroke-width: 1.4; stroke-opacity: .85; }
 .lab.low { opacity: .45; }
 .st.lowdot.sel { fill: #fff !important; fill-opacity: 1; }
 .pdring { fill: none; stroke-dasharray: 3 2.2; stroke-width: 1.8; vector-effect: non-scaling-stroke; pointer-events: none; }
@@ -349,7 +350,9 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="#9cc0ff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>
       <span>probabili</span>
       <svg width="10" height="16"><circle cx="5" cy="8" r="2.4" fill="#9aa6c0" fill-opacity=".2" stroke="#9aa6c0" stroke-opacity=".35" stroke-width=".7"/></svg>
-      <span>prob. bassa (0)</span>
+      <span>molto bassa (0)</span>
+      <svg width="12" height="16"><circle cx="6" cy="8" r="3.6" fill="none" stroke="#ef8a5a" stroke-width="1.4" stroke-dasharray="2 1.6"/></svg>
+      <span>bassa (0)</span>
     </div>
   </div>
   <aside class="panel" id="panel"></aside>
@@ -715,16 +718,19 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         // no certain train: only uncertain ones. Dashed ring sized by the trains counted (alta/media);
         // small dotted ring when only "bassa"/"molto bassa" (0 trains counted)
         const only0 = n.count === 0;
-        // probability bassa / molto bassa: a tiny dot (1.4 px on the whole of Italy) that grows only when zooming in
+        // probability "bassa" (an evening arrival, like Isernia): small dashed ring;
+        // "molto bassa" only: a tiny, almost transparent dot. Both grow a little when zooming in.
+        const bassa = only0 && n.byOp.some(o => o.lv[2] > 0);
         const lowPx = Math.min(4, 1.4 + Math.max(0, Math.log2(zoom)) * 0.55);
-        const rad = only0 ? lowPx / ppu : radOf(n.count, st.t);
+        const rad = only0 ? (bassa ? lowPx * 1.5 : lowPx) / ppu : radOf(n.count, st.t);
         if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
-        const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st " + (only0 ? "lowdot" : "pd") + (st === selected ? " sel" : "") }, gSt);
-        if (mainOp) { if (only0) { dot.style.fill = opInfo(mainOp).c; dot.style.color = opInfo(mainOp).c; } else dot.style.stroke = opInfo(mainOp).c; }
+        const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st " + (!only0 ? "pd" : bassa ? "lowdash" : "lowdot") + (st === selected ? " sel" : "") }, gSt);
+        const bop = bassa ? n.byOp.find(o => o.lv[2] > 0).op : mainOp;
+        if (bop) { if (only0 && !bassa) { dot.style.fill = opInfo(bop).c; dot.style.color = opInfo(bop).c; } else dot.style.stroke = opInfo(bop).c; }
         dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
-        el("title", {}, dot).textContent = only0 ? `${st.n}: probabilità bassa, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
+        el("title", {}, dot).textContent = only0 ? `${st.n}: probabilità ${bassa ? "bassa" : "molto bassa"}, 0 treni contati` : `${st.n}: ${n.count} treni probabili (nessuno certo)`;
         // names of the low-probability places only when zoomed in close (about 120 km across)
-        if (only0 ? (st === selected || spanKm < 120) : labelRule(st)) labels.push({ st, rad, faded: false, low: only0 && st !== selected, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
+        if (only0 ? (st === selected || spanKm < 120) : labelRule(st)) labels.push({ st, rad, faded: false, low: only0 && !bassa && st !== selected, pr: st === selected ? 0 : st.t + (only0 ? 1 : 0.5), c: n.count });
         continue;
       }
       const c = n.sure;
@@ -1341,7 +1347,7 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.4.2";
+  const APP_VERSION = "2.4.3";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
