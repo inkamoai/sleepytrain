@@ -252,6 +252,18 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 .lonely { color: var(--muted); font-size: 12px; font-style: italic; }
 .tr.prob { background: repeating-linear-gradient(135deg, transparent 0 10px, rgba(255, 181, 71, .05) 10px 20px); }
 .chip.probchip { background: rgba(255, 181, 71, .18); color: var(--amber); margin: 0 0 4px; }
+/* possible depots (deduced) and depots reported by the staff: dashed rings */
+.st.pd { fill: rgba(11, 18, 32, .55) !important; stroke-dasharray: 3 2.2; stroke-width: 2.2; stroke-opacity: 1; }
+.st.pd.ok { stroke-dasharray: none; stroke-width: 2.6; }
+.pdring { fill: none; stroke-dasharray: 3 2.2; stroke-width: 1.8; vector-effect: non-scaling-stroke; pointer-events: none; }
+.chip.pdchip { background: rgba(120, 170, 255, .16); color: #9cc0ff; margin: 0 0 4px; }
+.chip.okchip { background: rgba(95, 211, 154, .18); color: var(--green); margin: 0 0 4px; }
+.pdsec { border: 1px dashed rgba(156, 192, 255, .45); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.pdsec.ok { border-color: rgba(95, 211, 154, .5); border-style: solid; }
+.pdsec ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+.pdsec .big { font-family: var(--f-display); font-size: 20px; font-weight: 600; }
+.pdtoggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.pdtoggle button[aria-pressed="true"] { color: var(--amber); border-color: var(--amber-dim); }
 
 @media (max-width: 860px) {
   .top { position: static; }
@@ -325,6 +337,8 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
       <span>treni in deposito</span>
       <svg width="16" height="16"><path d="M8,8L8,2A6,6 0 0 1 13.2,11Z" fill="#14a0de"/><path d="M8,8L13.2,11A6,6 0 1 1 8,2Z" fill="#c8102e"/><circle cx="8" cy="8" r="6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>
       <span>colori delle aziende</span>
+      <svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="none" stroke="#9cc0ff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>
+      <span>possibile / segnalato</span>
     </div>
   </div>
   <aside class="panel" id="panel"></aside>
@@ -438,7 +452,12 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
 
   let DATA = null, night = null, selected = null, opFilter = "", winFilter = "", region = "";
   const inScope = (st) => !region || st.r === region;
-  const hasOp = (st, op) => Object.values(st.k).some(n => n[op]);
+  const hasOp = (st, op) => Object.values(st.k).some(n => n[op]) || (st.pd || []).some(p => p.op === op);
+  // possible depots (deduced from the timetables) and depots reported by the staff, shown on request
+  let showPd = true;
+  try { showPd = localStorage.getItem("showPd") !== "0"; } catch (e) { }
+  const pdList = (st, only) => showPd ? (st.pd || []).filter(p => !only || p.op === only) : [];
+  const pdTrains = (pds) => pds.reduce((s, p) => s + (p.n || 1), 0);
 
   // logos (Wikimedia Commons) and typical rolling stock per operator / line
   const LOGOS = { "Trenitalia": "trenitalia", "Trenitalia Tper": "trenitalia-tper", "TUA": "tua", "SAD": "sad", "TFT": "tft",
@@ -641,18 +660,34 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     const items = [];
     for (const st of DATA.st) {
       const n = nightOf(st, ed, opFilter);
-      if (n.count === 0 && st !== selected) continue;
+      const pds = pdList(st, opFilter);
+      if (n.count === 0 && !pds.length && st !== selected) continue;
       const mine = !region || st.r === region;
       // an operator filter shows every station of that operator, towns included
       const visible = opFilter || region || st.t === 1 || (st.t === 2 && spanKm < 650) || (st.t === 3 && spanKm < 260) || st === selected;
-      if (mine && visible) items.push({ st, n, faded: false });
-      else if (!mine && st.t === 1) items.push({ st, n, faded: true });
+      if (mine && visible) items.push({ st, n, pds, faded: false });
+      else if (!mine && st.t === 1 && n.count) items.push({ st, n, pds: [], faded: true });
     }
     items.sort((a, b) => (b.faded - a.faded) || (a.n.count - b.n.count));
     shownStations = items.filter(x => !x.faded).map(x => x.st);
 
     const labels = [];
-    for (const { st, n, faded } of items) {
+    for (const { st, n, pds, faded } of items) {
+      if (n.count === 0 && pds.length) {
+        // only a possible / reported depot here: hollow dashed ring in the operator's colour
+        const pc = pdTrains(pds);
+        const base = Math.max(st.t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(pc) * 1.5, 12));
+        const rad = base * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
+        if (st === selected) el("circle", { cx: st.x, cy: st.y, r: rad * 2.2, class: "glow" }, gSt);
+        const ok = pds.some(p => p.lv === "c");
+        const dot = el("circle", { cx: st.x, cy: st.y, r: rad, class: "st pd" + (ok ? " ok" : "") + (st === selected ? " sel" : "") }, gSt);
+        dot.style.stroke = opInfo(pds[0].op).c;
+        dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
+        el("title", {}, dot).textContent = `${st.n}: ${ok ? "deposito segnalato dal personale" : "deposito possibile, circa " + pc + " treni (da verificare)"}`;
+        const show = st === selected || st.t === 1 || (st.t === 2 && (region || spanKm < 650)) || (st.t === 3 && (region || spanKm < 200));
+        if (show) labels.push({ st, rad, faded: false, pr: st === selected ? 0 : st.t + 0.5, c: 0 });
+        continue;
+      }
       const c = n.count;
       const base = Math.max(st.t === 3 ? 4 : 4.5, Math.min(1.6 + Math.sqrt(Math.max(c, 1)) * 1.5, 14));
       const rad = base * Math.min(1.8, Math.max(1, Math.sqrt(zoom) * 0.9)) / ppu;
@@ -676,6 +711,11 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
           gSt.appendChild(dot); // keep the circle (outline + click target) above the slices
         }
         if (st === selected) dot.style.fill = n.byOp.length > 1 ? "transparent" : "#fff";
+      }
+      if (!faded && pds.length) {
+        // certain/probable trains here, and more possibly sleeping nearby on the sidings: an extra dashed ring
+        const ring = el("circle", { cx: st.x, cy: st.y, r: rad + 3 / ppu, class: "pdring" }, gSt);
+        ring.style.stroke = opInfo(pds[0].op).c;
       }
       if (!faded) {
         dot.addEventListener("click", (e) => { e.stopPropagation(); dragged = false; mapTap(e, null); });
@@ -780,6 +820,16 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
     }
     const occ = occupancy(ranked.map(x => x.st), ed);
     const totProb = ranked.reduce((s, x) => s + x.n.byOp.reduce((a, o) => a + o.dep.length, 0), 0);
+    // possible / reported depots in scope (not counted in the totals above: they are not in the timetables)
+    const pdAll = DATA.st.filter(inScope).map(st => ({ st, pds: (st.pd || []).filter(p => !opFilter || p.op === opFilter) })).filter(x => x.pds.length)
+      .sort((a, b) => (b.pds.some(p => p.lv === "c") - a.pds.some(p => p.lv === "c")) || pdTrains(b.pds) - pdTrains(a.pds));
+    const pdSection = pdAll.length ? `<div><h3>Depositi possibili e segnalati</h3>
+        <div class="pdtoggle"><button class="btn" id="pdtoggle" aria-pressed="${showPd}">${showPd ? "Mostrati sulla mappa" : "Nascosti sulla mappa"}</button>
+          <span>${pdAll.length} luoghi · circa ${pdAll.reduce((s, x) => s + pdTrains(x.pds), 0)} treni, da verificare</span></div>
+        <p class="lonely" style="margin:6px 0">Treni che probabilmente dormono qui arrivando e ripartendo a vuoto: non compaiono negli orari pubblici e non sono contati sopra.</p>
+        <div class="list">${pdAll.slice(0, region ? 100 : 25).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
+          <span class="dots">${x.pds.map(p => `<i style="background:transparent;border:2px ${p.lv === "c" ? "solid" : "dashed"} ${opInfo(p.op).c}" title="${esc(p.op)}"></i>`).join("")}</span>
+          <span class="c">${x.pds.some(p => p.lv === "c") ? "✓" : "~" + pdTrains(x.pds)}</span></button>`).join("")}</div></div>` : "";
     $("panel").innerHTML = `
       <div><div class="eyebrow">Notte ${esc(nightText({ weekday: "short", day: "numeric", month: "short" }))}</div>
         <h2 class="stname">${opFilter ? badge(opFilter) + " " : ""}${esc(region || "Tutta Italia")}</h2>
@@ -797,9 +847,15 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         <div class="list">${ranked.slice(0, region ? 200 : 30).map(x => `<button data-i="${DATA.st.indexOf(x.st)}"><span class="nm">${esc(x.st.n)}</span>
           <span class="dots">${x.n.byOp.map(o => `<i style="background:${opInfo(o.op).c}" title="${esc(o.op)}"></i>`).join("")}</span><span class="c">${x.n.count}</span></button>`).join("")}</div>
       </div>
+      ${pdSection}
       ${methodNote()}`;
     drawOccupancy($("occ"), occ);
     $("panel").querySelectorAll(".list button").forEach(b => b.onclick = () => openStation(DATA.st[+b.dataset.i]));
+    if ($("pdtoggle")) $("pdtoggle").onclick = () => {
+      showPd = !showPd;
+      try { localStorage.setItem("showPd", showPd ? "1" : "0"); } catch (e) { }
+      drawStations(); renderPanel();
+    };
     $("panel").querySelectorAll(".regbars button").forEach(b => b.onclick = () => setRegion(b.dataset.r));
     if ($("allit")) $("allit").onclick = () => setRegion("");
   }
@@ -962,10 +1018,22 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         </div></section>`;
     }).join("");
 
+    // possible depot (deduced) or reported by the staff: always listed in the window, whatever the map toggle
+    const pds = (st.pd || []).filter(p => !winFilter || p.op === winFilter);
+    const pdHtml = pds.map(p => `<section class="pdsec${p.lv === "c" ? " ok" : ""}">
+        <div class="opsec-h">${opLogo(p.op, 30)}<span class="chip ${p.lv === "c" ? "okchip" : "pdchip"}">${p.lv === "c" ? "segnalato dal personale" : "deposito possibile"}</span>
+          <span class="meta">${esc(p.op)}</span></div>
+        <div class="big">${p.lv === "c" ? (p.n ? `${p.n} treni` : "Treni in sosta notturna") : `circa ${p.n} ${p.n === 1 ? "treno" : "treni"} (stima)`}</div>
+        ${p.why.length ? `<ul>${p.why.map(w => `<li>${esc(w)}</li>`).join("")}</ul>` : ""}
+        ${p.yard ? `<div class="lonely">Qui ci sono circa ${p.yard >= 1000 ? (p.yard / 1000).toFixed(1).replace(".", ",") + " km" : p.yard + " m"} di binari di sosta (OpenStreetMap).</div>` : ""}
+        ${p.lv === "c" ? "" : `<div class="lonely">Dedotto dagli orari: i treni ci arriverebbero e ripartirebbero a vuoto. Da verificare sul posto.</div>`}
+      </section>`).join("");
+    const pdOps = (st.pd || []).map(p => p.op).filter(op => !all.byOp.some(o => o.op === op));
+
     $("win").innerHTML = `
       <div class="win-head">
         <button class="depbtn" id="depbtn"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M2 4l5-2 6 2 5-2v14l-5 2-6-2-5 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M7 2v14M13 4v14" stroke="currentColor" stroke-width="1.5"/></svg>Guarda deposito</button>
-        <div class="oplogos">${all.byOp.map(o => opLogo(o.op, 26)).join("")}</div>
+        <div class="oplogos">${all.byOp.map(o => opLogo(o.op, 26)).concat(pdOps.filter((op, i, a) => a.indexOf(op) === i).map(op => opLogo(op, 26))).join("")}</div>
         <div class="win-title">
           <div><div class="eyebrow">Notte ${esc(nightText({ weekday: "long", day: "numeric", month: "long" }))}</div>
             <h2 class="stname" id="wtitle">${esc(st.n)}</h2>
@@ -973,7 +1041,8 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
           <button class="close" aria-label="Chiudi">×</button>
         </div>
         <div class="kpis">
-          <div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito${probN ? ` · ${probN} probabili` : ""}</div></div>
+          ${!count && pds.length ? `<div class="kpi"><div class="v">${pds.some(p => p.lv === "c") ? "✓" : "~" + pdTrains(pds)}</div><div class="k">${pds.some(p => p.lv === "c") ? "deposito segnalato" : "treni stimati, da verificare"}</div></div>`
+            : `<div class="kpi"><div class="v">${count}</div><div class="k">treni in deposito${probN ? ` · ${probN} probabili` : ""}</div></div>`}
           <div class="kpi"><div class="v">${deps[0] || "—"}</div><div class="k">prima partenza</div></div>
           <div class="kpi"><div class="v">${avg != null ? dur(avg) : "—"}</div><div class="k">sosta media</div></div>
           <div class="kpi"><div class="v">${longest != null ? dur(longest) : "—"}</div><div class="k">sosta più lunga</div></div>
@@ -984,7 +1053,8 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
         </div>` : ""}
       </div>
       <div class="win-body">
-        ${shown.length ? sections : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
+        ${shown.length ? sections : pds.length ? "" : `<div class="empty">In questa notte nessun treno resta in deposito qui.</div>`}
+        ${pdHtml}
         <p class="note">Orari stimati dagli orari pubblici: l'abbinamento tra arrivo serale e partenza del mattino segue l'ordine degli orari della stessa azienda.</p>
       </div>`;
     $("win").querySelector(".close").onclick = closeWindow;
@@ -1201,12 +1271,13 @@ h3 { margin: 0 0 6px; font-family: var(--f-display); font-size: 18px; font-weigh
   function methodNote() {
     return `<div class="note">
       <p><strong>Come è calcolato.</strong> Per ogni stazione e per ogni azienda cerchiamo i treni che terminano la corsa la sera senza ripartire e quelli che iniziano la corsa il mattino dopo senza arrivare da un'altra stazione. Arrivi e partenze della stessa azienda sono abbinati in ordine di orario; la sosta è la differenza. È una stima: gli orari pubblici non dicono quale convoglio fa quale corsa.</p>
+      <p><strong>Depositi possibili e segnalati.</strong> I treni si spostano anche a vuoto, e questi viaggi non sono pubblicati. Quando in una stazione la sera finiscono la corsa più treni di quanti ne ripartano la mattina, o ne dormono più di quanti i suoi binari possano tenerne, cerchiamo nei dintorni (entro 30 km, sulle linee della stessa azienda) le stazioni con binari di sosta (OpenStreetMap): sono i <em>depositi possibili</em>, con una stima del numero di treni, da verificare. I depositi <em>segnalati</em> sono quelli confermati dal personale.</p>
       <p><strong>Fonti.</strong> Orari regionali Trenitalia (14 novembre – 12 dicembre 2026, con Tper, TUA, SAD e TFT); GTFS ufficiali di Trenord, EAV, ARST e Trentino Trasporti; programmi di esercizio 2026 di Ferrovie Sud Est, Ferrovie del Gargano, Ferrotramviaria e FAL dal portale open data della Regione Puglia; orari PDF della Circumetnea (dal 16 marzo 2026, solo feriali) e di Ferrovie della Calabria (Catanzaro e Cosenza, considerati dal lunedì al sabato perché l'orario non indica i giorni).</p>
     </div>`;
   }
 
   // ---------- informazioni ----------
-  const APP_VERSION = "2.1.0";
+  const APP_VERSION = "2.2.0";
   function openInfo() {
     selected = null;
     $("win").innerHTML = `
